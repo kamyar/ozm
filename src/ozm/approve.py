@@ -104,6 +104,7 @@ scrollView's setBorderType:(current application's NSBezelBorder)
 set contentSize to scrollView's contentSize()
 set tv to current application's NSTextView's alloc()'s initWithFrame:(current application's NSMakeRect(0, 0, contentSize's width, contentSize's height))
 tv's setEditable:false
+tv's setBackgroundColor:(current application's NSColor's colorWithRed:0.80 green:0.82 blue:0.84 alpha:1.0)
 tv's setMaxSize:{1.0E+7, 1.0E+7}
 tv's setVerticallyResizable:true
 tv's textContainer()'s setWidthTracksTextView:true
