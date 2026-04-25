@@ -22,12 +22,21 @@ jobs:
       - name: Set version
         run: |
           DATE_PART=$(date -u +%Y.%-m.%-d)
-          REV=${{ github.run_number }}
+          LAST=$(git tag --list "v${DATE_PART}.*" --sort=-v:refname | head -n1)
+          if [ -z "$LAST" ]; then
+            REV=1
+          else
+            REV=$(( ${LAST##*.} + 1 ))
+          fi
           VERSION="${DATE_PART}.${REV}"
           poetry version "${VERSION}"
+          git tag "v${VERSION}"
 
       - name: Build
         run: poetry build
 
       - name: Publish to PyPI
         run: poetry publish --username __token__ --password "${{ secrets.PYPI_TOKEN }}"
+
+      - name: Push tag
+        run: git push origin "v$(poetry version -s)"
