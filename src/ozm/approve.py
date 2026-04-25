@@ -138,7 +138,8 @@ def _parse_cocoa_result(result: subprocess.CompletedProcess) -> ApprovalResult:
 
     output = result.stdout.strip()
     if output.startswith("ALLOW:"):
-        return ApprovalResult(approved=True)
+        feedback = output[6:].strip() or None
+        return ApprovalResult(approved=True, feedback=feedback)
     if output.startswith("DENY:"):
         feedback = output[5:].strip() or None
         return ApprovalResult(approved=False, feedback=feedback)
@@ -238,7 +239,7 @@ def _approve_cmd_macos(command: str) -> ApprovalResult:
         stdout = result.stdout
         feedback = _extract_feedback(stdout)
         if "button returned:Allow" in stdout:
-            return ApprovalResult(approved=True)
+            return ApprovalResult(approved=True, feedback=feedback)
         if "button returned:Deny" in stdout:
             return ApprovalResult(approved=False, feedback=feedback)
         return ApprovalResult(approved=False)

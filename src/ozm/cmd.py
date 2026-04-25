@@ -47,7 +47,10 @@ def cmd_cmd(command_and_args: tuple[str, ...]) -> None:
     if approval.approved is True:
         hashes[key] = current_hash
         save_hashes(hashes)
-        click.echo("ozm: approved cmd")
+        if approval.feedback:
+            click.echo(f"ozm: approved cmd — {approval.feedback}", err=True)
+        else:
+            click.echo("ozm: approved cmd")
         result = subprocess.run(command, shell=True)
         sys.exit(result.returncode)
 
