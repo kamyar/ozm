@@ -107,18 +107,20 @@ def run_cmd(script: str, args: tuple[str, ...]) -> None:
 
 @click.command("status")
 def status_cmd() -> None:
-    """Show tracked files and their approval status."""
+    """Show tracked files and commands with their approval status."""
     hashes = load_hashes()
     if not hashes:
-        click.echo("No tracked files.")
+        click.echo("No tracked entries.")
         return
-    for path, stored_hash in sorted(hashes.items()):
-        if os.path.exists(path):
-            current = compute_hash(path)
+    for key, stored_hash in sorted(hashes.items()):
+        if key.startswith("cmd:"):
+            label = "ok"
+        elif os.path.exists(key):
+            current = compute_hash(key)
             label = "ok" if current == stored_hash else "CHANGED"
         else:
             label = "MISSING"
-        click.echo(f"  [{label:>7}] {path}")
+        click.echo(f"  [{label:>7}] {key}")
 
 
 @click.command("reset")
