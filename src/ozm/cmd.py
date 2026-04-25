@@ -76,13 +76,16 @@ def cmd_cmd(command_and_args: tuple[str, ...]) -> None:
     approval = request_cmd_approval(command)
 
     if approval.approved is True:
-        hashes[key] = current_hash
+        run_command = approval.command or command
+        run_key = project_key(CMD_PREFIX + run_command)
+        run_hash = _cmd_hash(run_command)
+        hashes[run_key] = run_hash
         save_hashes(hashes)
+        if run_command != command:
+            click.echo(f"ozm: approved cmd (edited)", err=True)
         if approval.feedback:
-            click.echo(f"ozm: approved cmd — {approval.feedback}", err=True)
-        else:
-            click.echo("ozm: approved cmd")
-        result = subprocess.run(command, shell=True)
+            click.echo(f"ozm: {approval.feedback}", err=True)
+        result = subprocess.run(run_command, shell=True)
         sys.exit(result.returncode)
 
     if approval.approved is False:
