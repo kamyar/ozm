@@ -24,7 +24,6 @@ jobs:
           DATE_PART=$(date -u +%Y.%-m%d)
           REV=${{ github.run_number }}
           VERSION="${DATE_PART}.${REV}"
-          echo "VERSION=${VERSION}" >> $GITHUB_ENV
           poetry version "${VERSION}"
 
       - name: Build
