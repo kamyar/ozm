@@ -11,6 +11,7 @@ import click
 import yaml
 
 from ozm.approve import request_approval
+from ozm.config import project_key
 
 OZM_DIR = os.path.expanduser("~/.ozm")
 HASH_FILE = os.path.join(OZM_DIR, "hashes.yaml")
@@ -70,9 +71,10 @@ def run_cmd(script: str, args: tuple[str, ...]) -> None:
         raise click.ClickException(f"{script}: not found")
 
     abs_path = resolve_path(script)
+    key = project_key(abs_path)
     current_hash = compute_hash(script)
     hashes = load_hashes()
-    stored_hash = hashes.get(abs_path)
+    stored_hash = hashes.get(key)
 
     if stored_hash == current_hash:
         ensure_executable(script)
@@ -84,7 +86,7 @@ def run_cmd(script: str, args: tuple[str, ...]) -> None:
     approved = request_approval(script, label)
 
     if approved is True:
-        hashes[abs_path] = current_hash
+        hashes[key] = current_hash
         save_hashes(hashes)
         click.echo(f"ozm: approved {script}")
         ensure_executable(script)
@@ -98,7 +100,7 @@ def run_cmd(script: str, args: tuple[str, ...]) -> None:
     click.echo(f"ozm: [{label}] {script}")
     show_file(script)
 
-    hashes[abs_path] = current_hash
+    hashes[key] = current_hash
     save_hashes(hashes)
 
     click.echo("Review the content above. Run the same command again to execute.")
@@ -108,19 +110,25 @@ def run_cmd(script: str, args: tuple[str, ...]) -> None:
 @click.command("status")
 def status_cmd() -> None:
     """Show tracked files and commands with their approval status."""
+    from ozm.config import find_project_root
+
+    root = find_project_root()
+    prefix = root + ":"
     hashes = load_hashes()
-    if not hashes:
+    entries = {k: v for k, v in hashes.items() if k.startswith(prefix)}
+    if not entries:
         click.echo("No tracked entries.")
         return
-    for key, stored_hash in sorted(hashes.items()):
-        if key.startswith("cmd:"):
+    for key, stored_hash in sorted(entries.items()):
+        display = key[len(prefix):]
+        if "cmd:" in display:
             label = "ok"
-        elif os.path.exists(key):
-            current = compute_hash(key)
+        elif os.path.exists(display):
+            current = compute_hash(display)
             label = "ok" if current == stored_hash else "CHANGED"
         else:
             label = "MISSING"
-        click.echo(f"  [{label:>7}] {key}")
+        click.echo(f"  [{label:>7}] {display}")
 
 
 @click.command("reset")
@@ -128,19 +136,26 @@ def status_cmd() -> None:
 @click.option("--all", "reset_all", is_flag=True, help="Forget all approvals.")
 def reset_cmd(script: str | None, reset_all: bool) -> None:
     """Forget approval for a script (or all scripts with --all)."""
+    from ozm.config import find_project_root
+
+    root = find_project_root()
+    prefix = root + ":"
+
     if reset_all:
-        if os.path.exists(HASH_FILE):
-            os.remove(HASH_FILE)
-        click.echo("All approvals cleared.")
+        hashes = load_hashes()
+        hashes = {k: v for k, v in hashes.items() if not k.startswith(prefix)}
+        save_hashes(hashes)
+        click.echo("All approvals cleared for this project.")
         return
 
     if not script:
         raise click.ClickException("Provide a script name, or use --all.")
 
     abs_path = resolve_path(script)
+    key = project_key(abs_path)
     hashes = load_hashes()
-    if abs_path not in hashes:
+    if key not in hashes:
         raise click.ClickException(f"{script} is not tracked.")
-    del hashes[abs_path]
+    del hashes[key]
     save_hashes(hashes)
     click.echo(f"Forgot approval for {script}")
