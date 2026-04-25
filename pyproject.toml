@@ -1,5 +1,5 @@
 [tool.poetry]
-name = "oberzugriffsmeister"
+name = "ozm"
 version = "0.0.0"
 description = "Content-aware script execution gate and git rule enforcer"
 authors = ["Kamyar <claude@kamy.me>"]

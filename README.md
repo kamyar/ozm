@@ -7,7 +7,7 @@ When AI agents write scripts and need to run them, `ozm` ensures you review the 
 ## Install
 
 ```
-uv tool install oberzugriffsmeister
+uv tool install ozm
 ```
 
 ## Setup
