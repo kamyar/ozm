@@ -1,22 +1,19 @@
 #!/usr/bin/env python3
-"""Hash-based script execution gate.
-
-First run with new/changed content displays the file and exits.
-Second run with the same content executes it.
-"""
+"""Hash-based script execution gate."""
 
 import hashlib
-import json
 import os
 import stat
 import subprocess
 import sys
 
 import click
+import yaml
 
 from ozm.approve import request_approval
 
-HASH_FILE = ".ozm-hashes.json"
+OZM_DIR = os.path.expanduser("~/.ozm")
+HASH_FILE = os.path.join(OZM_DIR, "hashes.yaml")
 
 
 def compute_hash(path: str) -> str:
@@ -24,17 +21,22 @@ def compute_hash(path: str) -> str:
         return hashlib.sha256(f.read()).hexdigest()
 
 
+def resolve_path(path: str) -> str:
+    return os.path.abspath(path)
+
+
 def load_hashes() -> dict[str, str]:
     if os.path.exists(HASH_FILE):
         with open(HASH_FILE) as f:
-            return json.load(f)
+            data = yaml.safe_load(f)
+            return data if data else {}
     return {}
 
 
 def save_hashes(hashes: dict[str, str]) -> None:
+    os.makedirs(OZM_DIR, exist_ok=True)
     with open(HASH_FILE, "w") as f:
-        json.dump(hashes, f, indent=2, sort_keys=True)
-        f.write("\n")
+        yaml.dump(hashes, f, default_flow_style=False, sort_keys=True)
 
 
 def show_file(path: str) -> None:
@@ -63,17 +65,14 @@ def ensure_executable(path: str) -> None:
 @click.argument("script")
 @click.argument("args", nargs=-1, type=click.UNPROCESSED)
 def run_cmd(script: str, args: tuple[str, ...]) -> None:
-    """Run a script after content review.
-
-    First invocation with new or changed content shows the file and exits.
-    Run the same command again to execute.
-    """
+    """Run a script after content review (hash-gated)."""
     if not os.path.exists(script):
         raise click.ClickException(f"{script}: not found")
 
+    abs_path = resolve_path(script)
     current_hash = compute_hash(script)
     hashes = load_hashes()
-    stored_hash = hashes.get(script)
+    stored_hash = hashes.get(abs_path)
 
     if stored_hash == current_hash:
         ensure_executable(script)
@@ -85,7 +84,7 @@ def run_cmd(script: str, args: tuple[str, ...]) -> None:
     approved = request_approval(script, label)
 
     if approved is True:
-        hashes[script] = current_hash
+        hashes[abs_path] = current_hash
         save_hashes(hashes)
         click.echo(f"ozm: approved {script}")
         ensure_executable(script)
@@ -96,11 +95,10 @@ def run_cmd(script: str, args: tuple[str, ...]) -> None:
         click.echo(f"ozm: denied {script}")
         sys.exit(1)
 
-    # Fallback: no dialog available, use show-and-retry flow
     click.echo(f"ozm: [{label}] {script}")
     show_file(script)
 
-    hashes[script] = current_hash
+    hashes[abs_path] = current_hash
     save_hashes(hashes)
 
     click.echo("Review the content above. Run the same command again to execute.")
@@ -137,9 +135,10 @@ def reset_cmd(script: str | None, reset_all: bool) -> None:
     if not script:
         raise click.ClickException("Provide a script name, or use --all.")
 
+    abs_path = resolve_path(script)
     hashes = load_hashes()
-    if script not in hashes:
+    if abs_path not in hashes:
         raise click.ClickException(f"{script} is not tracked.")
-    del hashes[script]
+    del hashes[abs_path]
     save_hashes(hashes)
     click.echo(f"Forgot approval for {script}")

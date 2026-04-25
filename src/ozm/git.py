@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Git command wrappers with rule enforcement."""
+"""Git pass-through with rule enforcement on commit and push."""
 
 import subprocess
 import sys
@@ -49,19 +49,8 @@ def validate_message(message: str) -> list[str]:
     return errors
 
 
-@click.group("git")
-def git_group():
-    """Git command wrappers with rule enforcement."""
-
-
-@git_group.command(
-    "commit",
-    context_settings={"ignore_unknown_options": True, "allow_extra_args": True},
-)
-@click.argument("args", nargs=-1, type=click.UNPROCESSED)
-def commit(args: tuple[str, ...]) -> None:
-    """Run git commit with message validation."""
-    message = extract_message(list(args))
+def _check_commit(args: list[str]) -> None:
+    message = extract_message(args)
     if message:
         errors = validate_message(message)
         if errors:
@@ -70,21 +59,10 @@ def commit(args: tuple[str, ...]) -> None:
                 click.echo(f"  - {e}", err=True)
             sys.exit(1)
 
-    result = subprocess.run(["git", "commit", *args])
-    sys.exit(result.returncode)
 
-
-@git_group.command(
-    "push",
-    context_settings={"ignore_unknown_options": True, "allow_extra_args": True},
-)
-@click.argument("args", nargs=-1, type=click.UNPROCESSED)
-def push(args: tuple[str, ...]) -> None:
-    """Run git push with safety checks."""
-    args_list = list(args)
-
+def _check_push(args: list[str]) -> None:
     force_flags = {"--force", "-f"}
-    if any(a in force_flags for a in args_list):
+    if any(a in force_flags for a in args):
         click.echo("ozm: force push is not allowed", err=True)
         sys.exit(1)
 
@@ -93,10 +71,30 @@ def push(args: tuple[str, ...]) -> None:
         click.echo(f"ozm: pushing to '{branch}' is not allowed", err=True)
         sys.exit(1)
 
-    for arg in args_list:
+    for arg in args:
         if not arg.startswith("-") and arg in PROTECTED_BRANCHES:
             click.echo(f"ozm: pushing to '{arg}' is not allowed", err=True)
             sys.exit(1)
 
-    result = subprocess.run(["git", "push", *args_list])
+
+@click.command(
+    "git",
+    context_settings={"ignore_unknown_options": True, "allow_extra_args": True},
+)
+@click.argument("args", nargs=-1, type=click.UNPROCESSED)
+def git_cmd(args: tuple[str, ...]) -> None:
+    """Git pass-through. Enforces rules on commit and push."""
+    if not args:
+        subprocess.run(["git"])
+        return
+
+    subcmd = args[0]
+    rest = list(args[1:])
+
+    if subcmd == "commit":
+        _check_commit(rest)
+    elif subcmd == "push":
+        _check_push(rest)
+
+    result = subprocess.run(["git", *args])
     sys.exit(result.returncode)
