@@ -42,17 +42,20 @@ def cmd_cmd(command_and_args: tuple[str, ...]) -> None:
         result = subprocess.run(command, shell=True)
         sys.exit(result.returncode)
 
-    approved = request_cmd_approval(command)
+    approval = request_cmd_approval(command)
 
-    if approved is True:
+    if approval.approved is True:
         hashes[key] = current_hash
         save_hashes(hashes)
         click.echo("ozm: approved cmd")
         result = subprocess.run(command, shell=True)
         sys.exit(result.returncode)
 
-    if approved is False:
-        click.echo("ozm: denied cmd")
+    if approval.approved is False:
+        if approval.feedback:
+            click.echo(f"ozm: denied cmd — {approval.feedback}", err=True)
+        else:
+            click.echo("ozm: denied cmd", err=True)
         sys.exit(1)
 
     click.echo(f"ozm: {command}")

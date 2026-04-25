@@ -83,9 +83,9 @@ def run_cmd(script: str, args: tuple[str, ...]) -> None:
 
     label = "NEW" if stored_hash is None else "CHANGED"
 
-    approved = request_approval(script, label)
+    approval = request_approval(script, label)
 
-    if approved is True:
+    if approval.approved is True:
         hashes[key] = current_hash
         save_hashes(hashes)
         click.echo(f"ozm: approved {script}")
@@ -93,8 +93,11 @@ def run_cmd(script: str, args: tuple[str, ...]) -> None:
         result = subprocess.run([script, *args])
         sys.exit(result.returncode)
 
-    if approved is False:
-        click.echo(f"ozm: denied {script}")
+    if approval.approved is False:
+        if approval.feedback:
+            click.echo(f"ozm: denied {script} — {approval.feedback}", err=True)
+        else:
+            click.echo(f"ozm: denied {script}", err=True)
         sys.exit(1)
 
     click.echo(f"ozm: [{label}] {script}")
