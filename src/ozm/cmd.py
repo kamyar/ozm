@@ -2,6 +2,7 @@
 """Arbitrary command pass-through with approval dialog."""
 
 import hashlib
+import os
 import subprocess
 import sys
 
@@ -18,6 +19,16 @@ def _cmd_hash(command: str) -> str:
     return hashlib.sha256(command.encode()).hexdigest()
 
 
+def _find_script_in_args(args: tuple[str, ...]) -> str | None:
+    for arg in args:
+        if arg.startswith("-"):
+            continue
+        _, ext = os.path.splitext(arg)
+        if ext and os.path.isfile(arg):
+            return arg
+    return None
+
+
 @click.command(
     "cmd",
     context_settings={"ignore_unknown_options": True, "allow_extra_args": True},
@@ -27,6 +38,15 @@ def cmd_cmd(command_and_args: tuple[str, ...]) -> None:
     """Run an arbitrary command after approval."""
     if not command_and_args:
         raise click.ClickException("Nothing to run.")
+
+    script = _find_script_in_args(command_and_args)
+    if script:
+        click.echo(
+            f"ozm: use 'ozm run {script}' instead — "
+            f"make sure the script has a shebang (e.g. #!/usr/bin/env python3)",
+            err=True,
+        )
+        sys.exit(1)
 
     command = " ".join(command_and_args)
 
