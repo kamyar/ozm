@@ -22,14 +22,41 @@ class ReviewSession(NamedTuple):
     filename: str | None = None
 
 
-def request_approval(script: str, label: str) -> bool | None:
-    """Ask the user to review and approve a script via OS-native UI.
+class ApprovalResult(NamedTuple):
+    approved: bool | None
+    feedback: str | None = None
 
-    Returns True if approved, False if denied, None if no dialog available.
-    """
+
+def _get_feedback_macos() -> str | None:
+    script = (
+        'display dialog "Feedback for the agent:" '
+        'default answer "" '
+        'buttons {"Cancel", "Send"} default button "Send" '
+        'with title "ozm"'
+    )
+    try:
+        result = subprocess.run(
+            ["osascript", "-e", script],
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+    if result.returncode != 0:
+        return None
+    for part in result.stdout.strip().split(", "):
+        if part.startswith("text returned:"):
+            text = part[len("text returned:"):]
+            return text if text.strip() else None
+    return None
+
+
+def request_approval(script: str, label: str) -> ApprovalResult:
+    """Ask the user to review and approve a script via OS-native UI."""
     if platform.system() == "Darwin":
         return _approve_macos(script, label)
-    return None
+    return ApprovalResult(approved=None)
 
 
 def _count_lines(path: str) -> int:
@@ -103,17 +130,30 @@ def _close_electron_window(process_name: str, filename: str) -> None:
         pass
 
 
-def request_cmd_approval(command: str) -> bool | None:
-    """Ask the user to approve an arbitrary command via OS-native dialog.
-
-    Returns True if approved, False if denied, None if no dialog available.
-    """
+def request_cmd_approval(command: str) -> ApprovalResult:
+    """Ask the user to approve an arbitrary command via OS-native dialog."""
     if platform.system() == "Darwin":
         return _approve_cmd_macos(command)
-    return None
+    return ApprovalResult(approved=None)
 
 
-def _approve_cmd_macos(command: str) -> bool | None:
+def _parse_dialog_result(result: subprocess.CompletedProcess) -> ApprovalResult:
+    if result.returncode == 0:
+        stdout = result.stdout
+        if "button returned:Allow" in stdout:
+            return ApprovalResult(approved=True)
+        if "button returned:Deny" in stdout:
+            feedback = _get_feedback_macos() if platform.system() == "Darwin" else None
+            return ApprovalResult(approved=False, feedback=feedback)
+        return ApprovalResult(approved=False)
+
+    if "user canceled" in result.stderr.lower():
+        return ApprovalResult(approved=False)
+
+    return ApprovalResult(approved=None)
+
+
+def _approve_cmd_macos(command: str) -> ApprovalResult:
     safe_cmd = command.replace("\\", "\\\\").replace('"', '\\"')
     dialog_text = (
         f"Command:\\n\\n{safe_cmd}\\n\\n"
@@ -134,18 +174,12 @@ def _approve_cmd_macos(command: str) -> bool | None:
             timeout=300,
         )
     except (subprocess.TimeoutExpired, OSError):
-        return None
+        return ApprovalResult(approved=None)
 
-    if result.returncode == 0:
-        return "button returned:Allow" in result.stdout
-
-    if "user canceled" in result.stderr.lower():
-        return False
-
-    return None
+    return _parse_dialog_result(result)
 
 
-def _approve_macos(script: str, label: str) -> bool | None:
+def _approve_macos(script: str, label: str) -> ApprovalResult:
     line_count = _count_lines(script)
     session = _open_for_review(script)
 
@@ -172,14 +206,7 @@ def _approve_macos(script: str, label: str) -> bool | None:
         )
     except (subprocess.TimeoutExpired, OSError):
         _close_review(session)
-        return None
+        return ApprovalResult(approved=None)
 
     _close_review(session)
-
-    if result.returncode == 0:
-        return "button returned:Allow" in result.stdout
-
-    if "user canceled" in result.stderr.lower():
-        return False
-
-    return None
+    return _parse_dialog_result(result)
