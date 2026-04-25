@@ -27,25 +27,8 @@ class ApprovalResult(NamedTuple):
     feedback: str | None = None
 
 
-def _get_feedback_macos() -> str | None:
-    script = (
-        'display dialog "Feedback for the agent:" '
-        'default answer "" '
-        'buttons {"Cancel", "Send"} default button "Send" '
-        'with title "ozm"'
-    )
-    try:
-        result = subprocess.run(
-            ["osascript", "-e", script],
-            capture_output=True,
-            text=True,
-            timeout=300,
-        )
-    except (subprocess.TimeoutExpired, OSError):
-        return None
-    if result.returncode != 0:
-        return None
-    for part in result.stdout.strip().split(", "):
+def _extract_feedback(stdout: str) -> str | None:
+    for part in stdout.strip().split(", "):
         if part.startswith("text returned:"):
             text = part[len("text returned:"):]
             return text if text.strip() else None
@@ -140,10 +123,10 @@ def request_cmd_approval(command: str) -> ApprovalResult:
 def _parse_dialog_result(result: subprocess.CompletedProcess) -> ApprovalResult:
     if result.returncode == 0:
         stdout = result.stdout
+        feedback = _extract_feedback(stdout)
         if "button returned:Allow" in stdout:
             return ApprovalResult(approved=True)
         if "button returned:Deny" in stdout:
-            feedback = _get_feedback_macos() if platform.system() == "Darwin" else None
             return ApprovalResult(approved=False, feedback=feedback)
         return ApprovalResult(approved=False)
 
@@ -166,6 +149,7 @@ def _approve_cmd_macos(command: str) -> ApprovalResult:
                 "osascript",
                 "-e",
                 f'display dialog "{dialog_text}" '
+                f'default answer "" '
                 f'buttons {{"Deny", "Allow"}} default button "Deny" '
                 f'with title "ozm" with icon caution',
             ],
@@ -197,6 +181,7 @@ def _approve_macos(script: str, label: str) -> ApprovalResult:
                 "osascript",
                 "-e",
                 f'display dialog "{dialog_text}" '
+                f'default answer "" '
                 f'buttons {{"Deny", "Allow"}} default button "Deny" '
                 f'with title "ozm" with icon caution',
             ],
