@@ -21,7 +21,7 @@ jobs:
 
       - name: Set version
         run: |
-          DATE_PART=$(date -u +%Y.%-m%d)
+          DATE_PART=$(date -u +%Y.%-m.%-d)
           REV=${{ github.run_number }}
           VERSION="${DATE_PART}.${REV}"
           poetry version "${VERSION}"
