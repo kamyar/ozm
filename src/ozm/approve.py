@@ -103,6 +103,48 @@ def _close_electron_window(process_name: str, filename: str) -> None:
         pass
 
 
+def request_cmd_approval(command: str) -> bool | None:
+    """Ask the user to approve an arbitrary command via OS-native dialog.
+
+    Returns True if approved, False if denied, None if no dialog available.
+    """
+    if platform.system() == "Darwin":
+        return _approve_cmd_macos(command)
+    return None
+
+
+def _approve_cmd_macos(command: str) -> bool | None:
+    safe_cmd = command.replace("\\", "\\\\").replace('"', '\\"')
+    dialog_text = (
+        f"Command:\\n\\n{safe_cmd}\\n\\n"
+        f"Allow execution?"
+    )
+
+    try:
+        result = subprocess.run(
+            [
+                "osascript",
+                "-e",
+                f'display dialog "{dialog_text}" '
+                f'buttons {{"Deny", "Allow"}} default button "Deny" '
+                f'with title "ozm" with icon caution',
+            ],
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+
+    if result.returncode == 0:
+        return "button returned:Allow" in result.stdout
+
+    if "user canceled" in result.stderr.lower():
+        return False
+
+    return None
+
+
 def _approve_macos(script: str, label: str) -> bool | None:
     line_count = _count_lines(script)
     session = _open_for_review(script)
