@@ -50,6 +50,21 @@ def is_command_allowed(command: str) -> bool:
     return False
 
 
+def add_allowed_command(pattern: str) -> None:
+    """Append a pattern to allowed_commands in .ozm.yaml."""
+    root = find_project_root()
+    path = os.path.join(root, CONFIG_FILE)
+    config = load_project_config()
+    commands = config.get("allowed_commands", [])
+    if not isinstance(commands, list):
+        commands = []
+    if pattern not in commands:
+        commands.append(pattern)
+        config["allowed_commands"] = commands
+        with open(path, "w") as f:
+            yaml.dump(config, f, default_flow_style=False, sort_keys=False)
+
+
 def commit_config() -> dict:
     """Return the 'commit' section of .ozm.yaml, or empty dict."""
     config = load_project_config()

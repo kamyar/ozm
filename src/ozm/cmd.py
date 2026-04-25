@@ -9,7 +9,7 @@ import sys
 import click
 
 from ozm.approve import request_cmd_approval
-from ozm.config import is_command_allowed, project_key
+from ozm.config import add_allowed_command, is_command_allowed, project_key
 from ozm.run import load_hashes, save_hashes
 
 CMD_PREFIX = "cmd:"
@@ -77,14 +77,15 @@ def cmd_cmd(command_and_args: tuple[str, ...]) -> None:
 
     if approval.approved is True:
         run_command = approval.command or command
+        if approval.allow_pattern:
+            add_allowed_command(approval.allow_pattern)
+            click.echo(f"ozm: added allowlist pattern: {approval.allow_pattern}", err=True)
         run_key = project_key(CMD_PREFIX + run_command)
         run_hash = _cmd_hash(run_command)
         hashes[run_key] = run_hash
         save_hashes(hashes)
         if run_command != command:
             click.echo(f"ozm: approved cmd (edited)", err=True)
-        if approval.feedback:
-            click.echo(f"ozm: {approval.feedback}", err=True)
         result = subprocess.run(run_command, shell=True)
         sys.exit(result.returncode)
 

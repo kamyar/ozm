@@ -12,6 +12,7 @@ class ApprovalResult(NamedTuple):
     approved: bool | None
     feedback: str | None = None
     command: str | None = None
+    allow_pattern: str | None = None
 
 
 def request_approval(script: str, label: str) -> ApprovalResult:
@@ -215,21 +216,34 @@ current application's NSApp's activateIgnoringOtherApps:true
 
 set alert to current application's NSAlert's alloc()'s init()
 alert's setMessageText:"Command"
-alert's setInformativeText:"Edit the command if needed, then Allow or Deny."
+alert's setInformativeText:"Edit the command or add an allowlist pattern."
 alert's setAlertStyle:(current application's NSAlertStyleWarning)
 alert's addButtonWithTitle:"Allow"
 alert's addButtonWithTitle:"Deny"
 
-set accessory to current application's NSView's alloc()'s initWithFrame:(current application's NSMakeRect(0, 0, 560, 70))
+set accessory to current application's NSView's alloc()'s initWithFrame:(current application's NSMakeRect(0, 0, 560, 105))
 
-set cmdField to current application's NSTextField's alloc()'s initWithFrame:(current application's NSMakeRect(0, 35, 560, 24))
+set cmdLabel to current application's NSTextField's labelWithString:"Run:"
+cmdLabel's setFrame:(current application's NSMakeRect(0, 80, 560, 16))
+cmdLabel's setFont:(current application's NSFont's systemFontOfSize:11)
+cmdLabel's setTextColor:(current application's NSColor's secondaryLabelColor())
+accessory's addSubview:cmdLabel
+
+set cmdField to current application's NSTextField's alloc()'s initWithFrame:(current application's NSMakeRect(0, 55, 560, 24))
 cmdField's setStringValue:"__COMMAND__"
 cmdField's setFont:(current application's NSFont's fontWithName:"Menlo" |size|:12)
 accessory's addSubview:cmdField
 
-set fb to current application's NSTextField's alloc()'s initWithFrame:(current application's NSMakeRect(0, 5, 560, 24))
-fb's setPlaceholderString:"Feedback for the agent..."
-accessory's addSubview:fb
+set patLabel to current application's NSTextField's labelWithString:"Allow pattern (saved to .ozm.yaml):"
+patLabel's setFrame:(current application's NSMakeRect(0, 32, 560, 16))
+patLabel's setFont:(current application's NSFont's systemFontOfSize:11)
+patLabel's setTextColor:(current application's NSColor's secondaryLabelColor())
+accessory's addSubview:patLabel
+
+set patField to current application's NSTextField's alloc()'s initWithFrame:(current application's NSMakeRect(0, 7, 560, 24))
+patField's setPlaceholderString:"e.g. curl httpbin.org/*"
+patField's setFont:(current application's NSFont's fontWithName:"Menlo" |size|:12)
+accessory's addSubview:patField
 
 alert's setAccessoryView:accessory
 alert's |window|()'s setInitialFirstResponder:cmdField
@@ -237,12 +251,12 @@ alert's |window|()'s setLevel:(current application's NSFloatingWindowLevel)
 
 set response to alert's runModal()
 set editedCmd to cmdField's stringValue() as text
-set feedback to fb's stringValue() as text
+set pattern to patField's stringValue() as text
 
 if response = (current application's NSAlertFirstButtonReturn) as integer then
-    return "ALLOW:" & editedCmd & "\\n" & feedback
+    return "ALLOW:" & editedCmd & "\\n" & pattern
 else
-    return "DENY:" & editedCmd & "\\n" & feedback
+    return "DENY:" & editedCmd & "\\n" & pattern
 end if
 '''
 
@@ -259,8 +273,8 @@ def _parse_cmd_result(result: subprocess.CompletedProcess) -> ApprovalResult:
             rest = output[len(prefix):]
             parts = rest.split("\n", 1)
             cmd = parts[0].strip() or None
-            feedback = parts[1].strip() if len(parts) > 1 and parts[1].strip() else None
-            return ApprovalResult(approved=approved, feedback=feedback, command=cmd)
+            pattern = parts[1].strip() if len(parts) > 1 and parts[1].strip() else None
+            return ApprovalResult(approved=approved, command=cmd, allow_pattern=pattern)
     return ApprovalResult(approved=None)
 
 
