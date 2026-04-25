@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.ozm-hashes.json
+dist/
+*.egg-info/
+.venv/
+poetry.lock
