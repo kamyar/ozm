@@ -1,0 +1,5 @@
+allowed_commands:
+  - pytest
+  - "uv pip install *"
+  - "uv run *"
+  - "git push origin main:main"

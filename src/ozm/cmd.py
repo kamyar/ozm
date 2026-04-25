@@ -8,6 +8,7 @@ import sys
 import click
 
 from ozm.approve import request_cmd_approval
+from ozm.config import is_command_allowed, project_key
 from ozm.run import load_hashes, save_hashes
 
 CMD_PREFIX = "cmd:"
@@ -28,7 +29,12 @@ def cmd_cmd(command_and_args: tuple[str, ...]) -> None:
         raise click.ClickException("Nothing to run.")
 
     command = " ".join(command_and_args)
-    key = CMD_PREFIX + command
+
+    if is_command_allowed(command):
+        result = subprocess.run(command, shell=True)
+        sys.exit(result.returncode)
+
+    key = project_key(CMD_PREFIX + command)
     current_hash = _cmd_hash(command)
     hashes = load_hashes()
 
