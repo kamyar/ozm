@@ -1,14 +1,18 @@
 #!/usr/bin/env python3
 """Git pass-through with rule enforcement on commit and push."""
 
+import re
 import subprocess
 import sys
 
 import click
 
+from ozm.config import commit_config
+
 MAX_SUBJECT_LENGTH = 72
 MAX_MESSAGE_LENGTH = 500
 PROTECTED_BRANCHES = {"main", "master"}
+ATTRIBUTION_PATTERN = re.compile(r"^Co-Authored-By:", re.IGNORECASE | re.MULTILINE)
 
 
 def get_current_branch() -> str | None:
@@ -53,10 +57,38 @@ def _check_commit(args: list[str]) -> None:
     message = extract_message(args)
     if message:
         errors = validate_message(message)
+
+        cfg = commit_config()
+
+        if cfg.get("allow_attribution") is False and ATTRIBUTION_PATTERN.search(message):
+            errors.append("Co-Authored-By attribution is not allowed in this project")
+
         if errors:
             click.echo("ozm: commit blocked:", err=True)
             for e in errors:
                 click.echo(f"  - {e}", err=True)
+            sys.exit(1)
+
+    cfg = commit_config()
+    branch = get_current_branch()
+
+    if cfg.get("require_branch") and branch in PROTECTED_BRANCHES:
+        click.echo(
+            f"ozm: commit blocked: committing directly to '{branch}' is not allowed",
+            err=True,
+        )
+        sys.exit(1)
+
+    prefixes = cfg.get("branch_prefixes")
+    if isinstance(prefixes, list) and prefixes and branch:
+        if branch not in PROTECTED_BRANCHES and not any(
+            branch.startswith(p) for p in prefixes
+        ):
+            click.echo(
+                f"ozm: commit blocked: branch '{branch}' does not match "
+                f"required prefixes: {', '.join(prefixes)}",
+                err=True,
+            )
             sys.exit(1)
 
 
