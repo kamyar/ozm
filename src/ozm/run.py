@@ -88,7 +88,10 @@ def run_cmd(script: str, args: tuple[str, ...]) -> None:
     if approval.approved is True:
         hashes[key] = current_hash
         save_hashes(hashes)
-        click.echo(f"ozm: approved {script}")
+        if approval.feedback:
+            click.echo(f"ozm: approved {script} — {approval.feedback}", err=True)
+        else:
+            click.echo(f"ozm: approved {script}")
         ensure_executable(script)
         result = subprocess.run([script, *args])
         sys.exit(result.returncode)
