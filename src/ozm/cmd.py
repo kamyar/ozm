@@ -19,13 +19,23 @@ def _cmd_hash(command: str) -> str:
     return hashlib.sha256(command.encode()).hexdigest()
 
 
-def _find_script_in_args(args: tuple[str, ...]) -> str | None:
+WRAPPERS = {"uv", "npx", "bunx", "poetry", "pipx", "run", "exec"}
+
+
+def _find_script_in_args(args: tuple[str, ...]) -> tuple[str, str] | None:
+    """Return (script_path, suggested_shebang) if args look like script execution."""
+    interpreter = None
     for arg in args:
         if arg.startswith("-"):
             continue
         _, ext = os.path.splitext(arg)
         if ext and os.path.isfile(arg):
-            return arg
+            shebang = f"#!/usr/bin/env {interpreter}" if interpreter else "#!/usr/bin/env <interpreter>"
+            return arg, shebang
+        if arg in WRAPPERS:
+            continue
+        if not interpreter and "/" not in arg:
+            interpreter = arg
     return None
 
 
@@ -39,11 +49,12 @@ def cmd_cmd(command_and_args: tuple[str, ...]) -> None:
     if not command_and_args:
         raise click.ClickException("Nothing to run.")
 
-    script = _find_script_in_args(command_and_args)
-    if script:
+    match = _find_script_in_args(command_and_args)
+    if match:
+        script, shebang = match
         click.echo(
             f"ozm: use 'ozm run {script}' instead — "
-            f"make sure the script has a shebang (e.g. #!/usr/bin/env python3)",
+            f"make sure the script has a shebang ({shebang})",
             err=True,
         )
         sys.exit(1)
