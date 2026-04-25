@@ -33,7 +33,8 @@ def deny(reason):
 
 SAFE = {"echo", "printf", "pwd", "date", "true", "false", "test"}
 
-parts = re.split(r"\s*(?:&&|\|\||;)\s*", command)
+stripped = re.sub(r"""(?:"(?:[^"\\]|\\.)*"|'[^']*')""", '""', command)
+parts = re.split(r"\s*(?:&&|\|\||;)\s*", stripped)
 for part in parts:
     part = part.strip()
     if not part:
