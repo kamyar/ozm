@@ -1,15 +1,2 @@
 {
-  "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "/Users/kamyarghasemlou/.ozm/hooks/enforce.sh"
-          }
-        ]
-      }
-    ]
-  }
 }

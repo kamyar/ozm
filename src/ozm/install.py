@@ -112,7 +112,7 @@ def _write_file(path: str, content: str) -> None:
 
 
 def _configure_claude_code() -> None:
-    claude_dir = os.path.join(os.getcwd(), ".claude")
+    claude_dir = os.path.expanduser("~/.claude")
     os.makedirs(claude_dir, exist_ok=True)
     settings_path = os.path.join(claude_dir, "settings.json")
 
@@ -144,11 +144,13 @@ def _configure_claude_code() -> None:
 
 
 @click.command("install")
-def install_cmd() -> None:
-    """Install ozm hooks and agent configuration in the current project."""
+@click.option("--project", is_flag=True, help="Also write CLAUDE.md and AGENTS.md in the current directory.")
+def install_cmd(project: bool) -> None:
+    """Install ozm hooks system-wide. Use --project to also write agent docs."""
     click.echo("ozm: installing...")
     _write_hook_script()
     _configure_claude_code()
-    _write_file("CLAUDE.md", CLAUDE_MD)
-    _write_file("AGENTS.md", AGENTS_MD)
+    if project:
+        _write_file("CLAUDE.md", CLAUDE_MD)
+        _write_file("AGENTS.md", AGENTS_MD)
     click.echo("ozm: done")
