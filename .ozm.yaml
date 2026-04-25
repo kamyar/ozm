@@ -3,3 +3,8 @@ allowed_commands:
   - "uv pip install *"
   - "uv run *"
   - "git push origin main:main"
+
+commit:
+  allow_attribution: false
+  require_branch: false
+  branch_prefixes: []

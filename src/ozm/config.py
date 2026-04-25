@@ -50,6 +50,13 @@ def is_command_allowed(command: str) -> bool:
     return False
 
 
+def commit_config() -> dict:
+    """Return the 'commit' section of .ozm.yaml, or empty dict."""
+    config = load_project_config()
+    section = config.get("commit", {})
+    return section if isinstance(section, dict) else {}
+
+
 def project_key(key: str) -> str:
     """Prefix a hash key with the project root for project-scoped storage."""
     root = find_project_root()
