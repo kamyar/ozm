@@ -1,9 +1,9 @@
 allowed_commands:
-  - pytest
-  - "uv pip install *"
-  - "uv run *"
-  - "git push origin main:main"
-
+- pytest
+- uv pip install *
+- uv run *
+- git push origin main:main
+- echo *
 commit:
   allow_attribution: false
   require_branch: false
