@@ -47,8 +47,8 @@ $ ozm run script.py [args...]
 ```
 
 First time (or after the script changes):
-- Opens the file in your editor (`$VISUAL` / `$EDITOR`) or Quick Look
-- Shows a native macOS dialog — Allow, or Deny with feedback
+- Shows a native macOS dialog with the full file content in a scrollable, read-only view
+- Allow, or Deny with optional feedback for the agent
 - On Allow: records the SHA-256 content hash and executes
 - On Deny: exits without running; feedback is printed to stderr for the agent
 
@@ -105,16 +105,7 @@ Approvals are project-scoped — approving `pytest` in one project doesn't carry
 3. Each command/script goes through: `.ozm.yaml` allowlist -> project-scoped hash cache (`~/.ozm/hashes.yaml`) -> approval dialog
 4. Approved content hashes are stored per-project, so unchanged commands/scripts run instantly
 
-On macOS, approval dialogs use native `osascript` with an inline text field for feedback. Supported editors for auto-close: VS Code, Cursor, VSCodium, Code Insiders.
-
-## Configuration
-
-| Env var   | Purpose                          | Example        |
-|-----------|----------------------------------|----------------|
-| `VISUAL`  | Editor for reviewing scripts     | `code`         |
-| `EDITOR`  | Fallback if `VISUAL` is not set  | `vim`          |
-
-If neither is set, macOS Quick Look is used.
+On macOS, script review uses a native Cocoa dialog (NSAlert) with a scrollable read-only text view and an inline feedback field. Command approval uses a simpler `display dialog` with the same feedback capability.
 
 ## Requirements
 
