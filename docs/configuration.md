@@ -1,38 +1,26 @@
 # Configuration
 
-ozm uses two types of configuration:
+ozm keeps all configuration in `~/.ozm/projects/` — outside the repo, where agents can't reach it.
 
-- **Per-project** — `.ozm.yaml` in your project root
-- **Global state** — `~/.ozm/` directory with hashes, audit log, and trust records
+The in-repo `.ozm.yaml` is never read at runtime. It serves as a template: run `ozm trust` to snapshot it into `~/.ozm/projects/`, where it becomes the active config. This is a security boundary — agents can edit `.ozm.yaml` all they want, but it has no effect until a human explicitly trusts it.
 
-## .ozm.yaml
+## Setup
 
-Place this file in your project root (next to `.git`). It controls command allowlists, blocklists, and commit rules for that project.
+```bash
+# See where config lives for this project
+$ ozm config
+project: /Users/you/myproject
+config:  /Users/you/.ozm/projects/myproject-a1b2c3d4e5f6g7h8.yaml
+status:  not found — run 'ozm trust' to import .ozm.yaml
 
-### Full example
-
-```yaml
-allowed_commands:
-  - pytest
-  - "uv run *"
-  - "uv pip install *"
-  - "npm test"
-  - "git push origin main:main"
-
-blocked_commands:
-  - "rm -rf *"
-  - "curl * | sh"
-  - "wget * | bash"
-
-commit:
-  allow_attribution: false
-  require_branch: true
-  branch_prefixes:
-    - "feat/"
-    - "fix/"
-    - "chore/"
-    - "kamy/"
+# Import the repo's .ozm.yaml
+$ ozm trust
+ozm: copied /Users/you/myproject/.ozm.yaml -> /Users/you/.ozm/projects/myproject-a1b2c3d4.yaml
 ```
+
+After trusting, you can edit `~/.ozm/projects/myproject-*.yaml` directly. Allowlist patterns added via the approval dialog are saved there automatically.
+
+## Config options
 
 ### allowed_commands
 
@@ -101,31 +89,13 @@ flowchart TD
     F -->|No| G[Show approval dialog]
 ```
 
-## Config trust
-
-When you enter a project with a `.ozm.yaml` you haven't seen before (or one that has changed since you last trusted it), ozm warns you before applying it. This prevents a cloned repository from silently pre-approving commands via its `.ozm.yaml`.
-
-Trust is tracked per-file via SHA-256 hashes stored in `~/.ozm/trusted_configs.yaml`.
-
-**Trust a config explicitly:**
-
-```bash
-ozm trust
-```
-
-**What happens without trust:**
-
-- `allowed_commands` and `blocked_commands` still work (they restrict, not expand, what runs)
-- `commit` rules require trust before taking effect
-- Adding allowlist patterns via the dialog automatically re-trusts the config
-
 ## Global state (~/.ozm/)
 
-| File | Purpose |
+| Path | Purpose |
 |------|---------|
+| `projects/<name>-<hash>.yaml` | Per-project config (allowlists, blocklists, commit rules) |
 | `hashes.yaml` | Project-scoped SHA-256 hashes of approved scripts and commands |
 | `audit.log` | Append-only log of all approvals, denials, and blocks |
-| `trusted_configs.yaml` | SHA-256 hashes of trusted `.ozm.yaml` files |
 | `hooks/enforce.sh` | The PreToolUse hook script installed by `ozm install` |
 
 ### hashes.yaml
