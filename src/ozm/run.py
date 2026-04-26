@@ -11,6 +11,7 @@ import click
 import yaml
 
 from ozm.approve import request_approval
+from ozm.audit import log as audit_log
 from ozm.config import project_key
 
 OZM_DIR = os.path.expanduser("~/.ozm")
@@ -77,6 +78,7 @@ def run_cmd(script: str, args: tuple[str, ...]) -> None:
     stored_hash = hashes.get(key)
 
     if stored_hash == current_hash:
+        audit_log("allowed", "run", abs_path)
         ensure_executable(script)
         result = subprocess.run([script, *args])
         sys.exit(result.returncode)
@@ -88,6 +90,7 @@ def run_cmd(script: str, args: tuple[str, ...]) -> None:
     if approval.approved is True:
         hashes[key] = current_hash
         save_hashes(hashes)
+        audit_log("allowed", "run", abs_path, approval.feedback)
         if approval.feedback:
             click.echo(f"ozm: approved {script} — {approval.feedback}", err=True)
         else:
@@ -97,6 +100,7 @@ def run_cmd(script: str, args: tuple[str, ...]) -> None:
         sys.exit(result.returncode)
 
     if approval.approved is False:
+        audit_log("denied", "run", abs_path, approval.feedback)
         if approval.feedback:
             click.echo(f"ozm: denied {script} — {approval.feedback}", err=True)
         else:
