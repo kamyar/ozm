@@ -2,6 +2,7 @@
 
 import os
 import shutil
+import subprocess
 
 import click
 
@@ -13,9 +14,30 @@ from ozm.cmd import cmd_cmd
 from ozm.doctor import doctor_cmd
 
 
+def _get_version() -> str:
+    src = os.path.dirname(os.path.abspath(__file__))
+    try:
+        result = subprocess.run(
+            ["git", "log", "-1", "--format=%h %cs"],
+            capture_output=True, text=True, timeout=3, cwd=src,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip()
+    except (subprocess.TimeoutExpired, OSError):
+        pass
+    return "unknown"
+
+
 @click.group()
+@click.version_option(version="dev", prog_name="ozm")
 def cli():
     """Content-aware script execution gate and git rule enforcer."""
+
+
+@click.command("version")
+def version_cmd() -> None:
+    """Show ozm version (git commit and date)."""
+    click.echo(f"ozm {_get_version()}")
 
 
 @click.command("trust")
@@ -56,3 +78,4 @@ cli.add_command(log_cmd, "log")
 cli.add_command(doctor_cmd, "doctor")
 cli.add_command(trust_cmd, "trust")
 cli.add_command(config_cmd, "config")
+cli.add_command(version_cmd, "version")
