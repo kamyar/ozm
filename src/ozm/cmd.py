@@ -21,6 +21,7 @@ def _cmd_hash(command: str) -> str:
 
 
 WRAPPERS = {"uv", "npx", "bunx", "poetry", "pipx", "run", "exec"}
+INTERPRETERS = {"python", "python3", "bash", "sh", "zsh", "node", "ruby", "perl"}
 
 
 def _find_script_in_args(args: tuple[str, ...]) -> tuple[str, str] | None:
@@ -29,13 +30,13 @@ def _find_script_in_args(args: tuple[str, ...]) -> tuple[str, str] | None:
     for arg in args:
         if arg.startswith("-"):
             continue
-        _, ext = os.path.splitext(arg)
-        if ext and os.path.isfile(arg):
-            shebang = f"#!/usr/bin/env {interpreter}" if interpreter else "#!/usr/bin/env <interpreter>"
-            return arg, shebang
         if arg in WRAPPERS:
             continue
-        if not interpreter and "/" not in arg:
+        _, ext = os.path.splitext(arg)
+        if ext and os.path.isfile(arg) and interpreter:
+            shebang = f"#!/usr/bin/env {interpreter}"
+            return arg, shebang
+        if not interpreter and "/" not in arg and arg in INTERPRETERS:
             interpreter = arg
     return None
 
@@ -69,7 +70,7 @@ def cmd_cmd(command_and_args: tuple[str, ...]) -> None:
         sys.exit(1)
 
     if is_command_allowed(command):
-        audit_log("allowed", "cmd", command)
+        audit_log("config", "cmd", command)
         result = subprocess.run(command, shell=True)
         sys.exit(result.returncode)
 
@@ -78,7 +79,7 @@ def cmd_cmd(command_and_args: tuple[str, ...]) -> None:
     hashes = load_hashes()
 
     if hashes.get(key) == current_hash:
-        audit_log("allowed", "cmd", command)
+        audit_log("cached", "cmd", command)
         result = subprocess.run(command, shell=True)
         sys.exit(result.returncode)
 
@@ -93,7 +94,7 @@ def cmd_cmd(command_and_args: tuple[str, ...]) -> None:
         run_hash = _cmd_hash(run_command)
         hashes[run_key] = run_hash
         save_hashes(hashes)
-        audit_log("allowed", "cmd", run_command, approval.feedback)
+        audit_log("clicked", "cmd", run_command, approval.feedback)
         if run_command != command:
             click.echo(f"ozm: approved cmd (edited)", err=True)
         result = subprocess.run(run_command, shell=True)
@@ -107,6 +108,7 @@ def cmd_cmd(command_and_args: tuple[str, ...]) -> None:
             click.echo("ozm: denied cmd", err=True)
         sys.exit(1)
 
+    audit_log("no-dialog", "cmd", command)
     click.echo(f"ozm: {command}")
     click.echo("No approval dialog available. Review the command above.")
     sys.exit(1)
