@@ -4,6 +4,7 @@ allowed_commands:
 - uv run *
 - git push origin main:main
 - echo *
+- rm *
 commit:
   allow_attribution: false
   require_branch: false
