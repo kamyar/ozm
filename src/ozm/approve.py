@@ -154,18 +154,22 @@ set scrollView to current application's NSScrollView's alloc()'s initWithFrame:(
 scrollView's setHasVerticalScroller:true
 scrollView's setBorderType:(current application's NSBezelBorder)
 
-set contentSize to scrollView's contentSize()
-set tv to current application's NSTextView's alloc()'s initWithFrame:(current application's NSMakeRect(0, 0, contentSize's width, contentSize's height))
+set cSize to scrollView's contentSize()
+set tv to current application's NSTextView's alloc()'s initWithFrame:(current application's NSMakeRect(0, 0, cSize's width, cSize's height))
 tv's setEditable:false
-set appearance to (current application's NSApp's effectiveAppearance()'s name()) as text
-if appearance contains "Dark" then
-    tv's setBackgroundColor:(current application's NSColor's colorWithRed:0.20 green:0.22 blue:0.24 alpha:1.0)
+set theAppearance to current application's NSApp's effectiveAppearance()
+set appearanceName to (theAppearance's |name|()) as text
+if appearanceName contains "Dark" then
+    set bgColor to current application's NSColor's colorWithRed:0.20 green:0.22 blue:0.24 alpha:1.0
+    tv's setBackgroundColor:bgColor
 else
-    tv's setBackgroundColor:(current application's NSColor's colorWithRed:0.80 green:0.82 blue:0.84 alpha:1.0)
+    set bgColor to current application's NSColor's colorWithRed:0.80 green:0.82 blue:0.84 alpha:1.0
+    tv's setBackgroundColor:bgColor
 end if
 tv's setMaxSize:{1.0E+7, 1.0E+7}
 tv's setVerticallyResizable:true
-tv's textContainer()'s setWidthTracksTextView:true
+set tc to tv's textContainer()
+tc's setWidthTracksTextView:true
 __SET_CONTENT__
 scrollView's setDocumentView:tv
 accessory's addSubview:scrollView
