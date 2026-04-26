@@ -1,0 +1,87 @@
+#!/usr/bin/env python3
+"""Diagnostics for ozm installation health."""
+
+import json
+import os
+import shutil
+
+import click
+
+from ozm.install import ENFORCE_HOOK
+
+CLAUDE_SETTINGS = os.path.expanduser("~/.claude/settings.json")
+
+
+def _check_ozm_on_path() -> tuple[bool, str]:
+    path = shutil.which("ozm")
+    if path:
+        return True, f"ozm found at {path}"
+    return False, "ozm not found on PATH"
+
+
+def _check_hook_script() -> tuple[bool, str]:
+    if os.path.isfile(ENFORCE_HOOK) and os.access(ENFORCE_HOOK, os.X_OK):
+        return True, f"hook script at {ENFORCE_HOOK}"
+    if os.path.isfile(ENFORCE_HOOK):
+        return False, f"hook exists but not executable: {ENFORCE_HOOK}"
+    return False, f"hook script missing: {ENFORCE_HOOK} — run 'ozm install'"
+
+
+def _check_claude_settings() -> tuple[bool, str]:
+    if not os.path.isfile(CLAUDE_SETTINGS):
+        return False, f"settings.json missing: {CLAUDE_SETTINGS} — run 'ozm install'"
+    try:
+        with open(CLAUDE_SETTINGS) as f:
+            settings = json.load(f)
+    except (json.JSONDecodeError, OSError) as e:
+        return False, f"settings.json unreadable: {e}"
+
+    pre_hooks = settings.get("hooks", {}).get("PreToolUse", [])
+    found = any(
+        h.get("matcher") == "Bash"
+        and any(hk.get("command") == ENFORCE_HOOK for hk in h.get("hooks", []))
+        for h in pre_hooks
+    )
+    if found:
+        return True, "Claude Code hook configured in settings.json"
+    return False, "ozm hook not found in settings.json — run 'ozm install'"
+
+
+def _check_pygments() -> tuple[bool, str]:
+    try:
+        import pygments
+        return True, f"pygments {pygments.__version__} available"
+    except ImportError:
+        return False, "pygments not installed — syntax highlighting disabled"
+
+
+def _check_project_config() -> tuple[bool, str]:
+    from ozm.config import find_project_root, CONFIG_FILE
+    root = find_project_root()
+    path = os.path.join(root, CONFIG_FILE)
+    if os.path.isfile(path):
+        return True, f".ozm.yaml found at {path}"
+    return True, "no .ozm.yaml in project (using defaults)"
+
+
+@click.command("doctor")
+def doctor_cmd() -> None:
+    """Check ozm installation health."""
+    checks = [
+        ("ozm binary", _check_ozm_on_path),
+        ("hook script", _check_hook_script),
+        ("claude settings", _check_claude_settings),
+        ("pygments", _check_pygments),
+        ("project config", _check_project_config),
+    ]
+    all_ok = True
+    for name, check in checks:
+        ok, msg = check()
+        icon = "ok" if ok else "WARN"
+        click.echo(f"  [{icon:>4}] {name}: {msg}")
+        if not ok:
+            all_ok = False
+    if all_ok:
+        click.echo("\nAll checks passed.")
+    else:
+        click.echo("\nSome issues found — see above.")
