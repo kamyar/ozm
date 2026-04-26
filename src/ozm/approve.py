@@ -197,7 +197,7 @@ def _parse_cocoa_result(result: subprocess.CompletedProcess) -> ApprovalResult:
     if result.returncode != 0:
         if "user canceled" in result.stderr.lower():
             return ApprovalResult(approved=False)
-        return ApprovalResult(approved=None)
+        return ApprovalResult(approved=None, feedback=result.stderr.strip() or None)
 
     output = result.stdout.strip()
     if output.startswith("ALLOW:"):
@@ -206,7 +206,7 @@ def _parse_cocoa_result(result: subprocess.CompletedProcess) -> ApprovalResult:
     if output.startswith("DENY:"):
         feedback = output[5:].strip() or None
         return ApprovalResult(approved=False, feedback=feedback)
-    return ApprovalResult(approved=None)
+    return ApprovalResult(approved=None, feedback=f"unexpected output: {output[:200]}")
 
 
 def _approve_file_macos(script: str, label: str, *, diff: str | None = None) -> ApprovalResult:
