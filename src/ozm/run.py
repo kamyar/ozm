@@ -79,6 +79,7 @@ def run_cmd(script: str, args: tuple[str, ...]) -> None:
 
     if stored_hash == current_hash:
         audit_log("cached", "run", abs_path)
+        click.echo("ozm: allowed (cached)", err=True)
         ensure_executable(script)
         result = subprocess.run([script, *args])
         sys.exit(result.returncode)

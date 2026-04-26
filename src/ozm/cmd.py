@@ -71,6 +71,7 @@ def cmd_cmd(command_and_args: tuple[str, ...]) -> None:
 
     if is_command_allowed(command):
         audit_log("config", "cmd", command)
+        click.echo("ozm: allowed (config)", err=True)
         result = subprocess.run(command, shell=True)
         sys.exit(result.returncode)
 
@@ -80,6 +81,7 @@ def cmd_cmd(command_and_args: tuple[str, ...]) -> None:
 
     if hashes.get(key) == current_hash:
         audit_log("cached", "cmd", command)
+        click.echo("ozm: allowed (cached)", err=True)
         result = subprocess.run(command, shell=True)
         sys.exit(result.returncode)
 
