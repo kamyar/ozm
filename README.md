@@ -11,21 +11,33 @@ AI coding agents are powerful, but they need to execute commands: installing pac
 - **Native macOS dialogs** with syntax-highlighted code review, dark mode support, and inline feedback
 - **Diff view** for changed scripts — see exactly what changed before re-approving
 - **Editable commands** — modify a command or set an allowlist pattern right in the approval dialog
-- **Audit log** — every approval and denial is recorded
-- **Config trust** — untrusted `.ozm.yaml` files are flagged before they take effect
-- **TTY fallback** — works in terminals without a GUI
+- **Audit log** — every approval, denial, and block is recorded with action source (clicked, cached, config, denied, blocked, no-dialog)
 
 No more clicking through identical permission prompts. No more worrying about what the agent just ran.
 
 ```mermaid
-flowchart LR
-    Agent -->|command| ozm
-    ozm --> B{Check}
-    B -->|blocked| Deny
-    B -->|allowed / cached| Run
-    B -->|unknown| Dialog
-    Dialog -->|approve| Run
-    Dialog -->|deny + feedback| Agent
+flowchart TD
+    Agent -->|shell command| Hook[PreToolUse Hook]
+    Hook -->|"safe (echo, pwd)"| Pass[Run directly]
+    Hook -->|git| OzmGit[ozm git]
+    Hook -->|script file| OzmRun[ozm run]
+    Hook -->|other| OzmCmd[ozm cmd]
+
+    OzmRun --> HashCheck{Hash cached?}
+    HashCheck -->|yes| Run[Execute + log]
+    HashCheck -->|no| FileDialog[Dialog: file content / diff]
+    FileDialog -->|allow| StoreRun[Store hash + execute]
+    FileDialog -->|deny + feedback| Agent
+
+    OzmCmd --> Blocked{Blocked?}
+    Blocked -->|yes| Deny[Deny + log]
+    Blocked -->|no| Allowed{Allowlisted?}
+    Allowed -->|yes| Run
+    Allowed -->|no| CmdCache{Hash cached?}
+    CmdCache -->|yes| Run
+    CmdCache -->|no| CmdDialog[Dialog: editable command]
+    CmdDialog -->|allow| StoreCmd[Store hash + execute]
+    CmdDialog -->|deny + feedback| Agent
 ```
 
 ## Install
@@ -46,11 +58,22 @@ pip install ozm
 
 ```bash
 cd your-project
-ozm install --project   # hooks into Claude Code globally, writes CLAUDE.md + AGENTS.md
-ozm trust               # trust the .ozm.yaml in this project
+ozm install --project   # hooks into Claude Code, writes CLAUDE.md + AGENTS.md
 ```
 
-That's it. From now on, the agent routes all commands through `ozm`.
+That's it. The agent now routes all Bash commands through `ozm`.
+
+**Optional:** Create `.ozm.yaml` in your project with pre-approved commands and blocklists, then run `ozm trust` to activate it. See [docs/configuration.md](docs/configuration.md).
+
+## Agent compatibility
+
+ozm works with any AI coding agent that executes shell commands:
+
+- **Claude Code** — hooks into the `PreToolUse` system via `~/.claude/settings.json`. The enforcement hook intercepts all Bash tool calls and blocks anything not routed through ozm.
+- **Codex / OpenAI agents** — reads `AGENTS.md` for tool usage instructions (written by `ozm install --project`)
+- **Other agents** — any agent that follows instructions in `CLAUDE.md` or `AGENTS.md` will route commands through ozm
+
+For Claude Code, enforcement is automatic via the hook. For other agents, compliance depends on the agent following the instructions in the project's markdown files.
 
 ## Commands
 
@@ -66,20 +89,21 @@ Commands:
   reset    Forget approval for a script (or all scripts with --all).
   log      Show recent audit log entries.
   doctor   Check ozm installation health.
-  trust    Trust the .ozm.yaml in the current project.
+  trust    Activate a project's .ozm.yaml config.
+  version  Show ozm version.
 ```
 
 See [docs/commands.md](docs/commands.md) for detailed usage and examples.
 
 ## Per-project configuration
 
-Create a `.ozm.yaml` in your project root:
+Configuration is optional. Without it, every command goes through the approval dialog or hash cache. To pre-approve safe commands, create `.ozm.yaml` in your project root:
 
 ```yaml
 allowed_commands:
   - pytest
-  - "uv run *"
   - "uv pip install *"
+  - "docker compose *"
 
 blocked_commands:
   - "rm -rf *"
@@ -89,6 +113,10 @@ commit:
   require_branch: false
   branch_prefixes: []
 ```
+
+Then run `ozm trust` to activate it. This copies `.ozm.yaml` into `~/.ozm/projects/` where ozm actually reads it. The in-repo file is never read at runtime — agents can edit it all they want, but changes have no effect until a human explicitly trusts it.
+
+> **Security note:** Avoid patterns like `"uv run *"` or `"python *"` in `allowed_commands` — these bypass content review for script files. Use `ozm run` for scripts instead, which gates on file content hash.
 
 See [docs/configuration.md](docs/configuration.md) for all options.
 
@@ -100,10 +128,10 @@ See [docs/configuration.md](docs/configuration.md) for all options.
 4. Approved content hashes are stored per-project in `~/.ozm/hashes.yaml`
 5. Every decision is logged to `~/.ozm/audit.log`
 
-On macOS, approvals use native Cocoa dialogs with syntax highlighting (via pygments), dark mode support, and inline feedback. On other platforms (or without a display), ozm falls back to a TTY prompt.
+On macOS, approvals use native Cocoa dialogs with syntax highlighting (via pygments), dark mode support, and inline feedback. Without a GUI session, the command is blocked and the agent receives a clear error — ozm never silently approves.
 
 ## Requirements
 
 - Python 3.12+
-- macOS (for native approval dialogs; falls back to TTY prompt on other platforms)
-- pygments (optional, for syntax highlighting)
+- macOS with a GUI session (native Cocoa dialogs; no GUI = commands are blocked, not silently approved)
+- pygments (optional, for syntax highlighting in dialogs)
