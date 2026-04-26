@@ -7,6 +7,8 @@ import subprocess
 import tempfile
 from typing import NamedTuple
 
+import click
+
 
 class ApprovalResult(NamedTuple):
     approved: bool | None
@@ -15,18 +17,66 @@ class ApprovalResult(NamedTuple):
     allow_pattern: str | None = None
 
 
+def _get_git_diff(path: str) -> str | None:
+    abs_path = os.path.abspath(path)
+    try:
+        result = subprocess.run(
+            ["git", "diff", "--no-color", abs_path],
+            capture_output=True, text=True, timeout=5,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout
+    except (subprocess.TimeoutExpired, OSError):
+        pass
+    return None
+
+
 def request_approval(script: str, label: str) -> ApprovalResult:
     """Ask the user to review and approve a script via OS-native UI."""
+    diff = _get_git_diff(script) if label == "CHANGED" else None
     if platform.system() == "Darwin":
-        return _approve_file_macos(script, label)
-    return ApprovalResult(approved=None)
+        result = _approve_file_macos(script, label, diff=diff)
+        if result.approved is not None:
+            return result
+    return _approve_file_tty(script, label)
 
 
 def request_cmd_approval(command: str) -> ApprovalResult:
     """Ask the user to approve an arbitrary command via OS-native dialog."""
     if platform.system() == "Darwin":
-        return _approve_cmd_macos(command)
-    return ApprovalResult(approved=None)
+        result = _approve_cmd_macos(command)
+        if result.approved is not None:
+            return result
+    return _approve_cmd_tty(command)
+
+
+def _approve_file_tty(script: str, label: str) -> ApprovalResult:
+    import sys
+    if not sys.stdin.isatty():
+        return ApprovalResult(approved=None)
+    line_count = _count_lines(script)
+    click.echo(f"\nozm: [{label}] {script} ({line_count} lines)")
+    with open(script) as f:
+        for i, line in enumerate(f, 1):
+            click.echo(f"  {i:>4} | {line}", nl=False)
+    click.echo()
+    try:
+        answer = input("ozm: allow? [y/N] ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        return ApprovalResult(approved=False)
+    return ApprovalResult(approved=answer in ("y", "yes"))
+
+
+def _approve_cmd_tty(command: str) -> ApprovalResult:
+    import sys
+    if not sys.stdin.isatty():
+        return ApprovalResult(approved=None)
+    click.echo(f"\nozm: command: {command}")
+    try:
+        answer = input("ozm: allow? [y/N] ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        return ApprovalResult(approved=False)
+    return ApprovalResult(approved=answer in ("y", "yes"))
 
 
 def _count_lines(path: str) -> int:
@@ -36,6 +86,19 @@ def _count_lines(path: str) -> int:
 
 def _escape(s: str) -> str:
     return s.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _is_dark_mode() -> bool:
+    if platform.system() != "Darwin":
+        return False
+    try:
+        result = subprocess.run(
+            ["defaults", "read", "-g", "AppleInterfaceStyle"],
+            capture_output=True, text=True,
+        )
+        return "dark" in result.stdout.strip().lower()
+    except OSError:
+        return False
 
 
 def _render_rtf(path: str) -> str | None:
@@ -54,14 +117,37 @@ def _render_rtf(path: str) -> str | None:
     except Exception:
         lexer = TextLexer()
 
-    formatter = RtfFormatter(fontface="Menlo", fontsize=22)
+    style = "monokai" if _is_dark_mode() else "default"
+    formatter = RtfFormatter(fontface="Menlo", fontsize=22, linenos=True, style=style)
     return highlight(content, lexer, formatter)
+
+
+def _render_diff_rtf(diff: str) -> str | None:
+    try:
+        from pygments import highlight
+        from pygments.formatters import RtfFormatter
+        from pygments.lexers import DiffLexer
+    except ImportError:
+        return None
+
+    style = "monokai" if _is_dark_mode() else "default"
+    formatter = RtfFormatter(fontface="Menlo", fontsize=22, style=style)
+    return highlight(diff, DiffLexer(), formatter)
 
 
 # Plain text content loading for AppleScript
 _LOAD_PLAIN = '''\
 set filePath to POSIX file "__FILEPATH__"
-set fileContent to read filePath as «class utf8»
+set rawContent to read filePath as «class utf8»
+set theLines to paragraphs of rawContent
+set numberedLines to {}
+repeat with i from 1 to count of theLines
+    set lineNum to text -4 thru -1 of ("    " & i)
+    set end of numberedLines to lineNum & "  " & item i of theLines
+end repeat
+set AppleScript's text item delimiters to linefeed
+set fileContent to numberedLines as text
+set AppleScript's text item delimiters to ""
 '''
 
 _SET_PLAIN = '''\
@@ -106,7 +192,12 @@ scrollView's setBorderType:(current application's NSBezelBorder)
 set contentSize to scrollView's contentSize()
 set tv to current application's NSTextView's alloc()'s initWithFrame:(current application's NSMakeRect(0, 0, contentSize's width, contentSize's height))
 tv's setEditable:false
-tv's setBackgroundColor:(current application's NSColor's colorWithRed:0.80 green:0.82 blue:0.84 alpha:1.0)
+set appearance to (current application's NSApp's effectiveAppearance()'s name()) as text
+if appearance contains "Dark" then
+    tv's setBackgroundColor:(current application's NSColor's colorWithRed:0.20 green:0.22 blue:0.24 alpha:1.0)
+else
+    tv's setBackgroundColor:(current application's NSColor's colorWithRed:0.80 green:0.82 blue:0.84 alpha:1.0)
+end if
 tv's setMaxSize:{1.0E+7, 1.0E+7}
 tv's setVerticallyResizable:true
 tv's textContainer()'s setWidthTracksTextView:true
@@ -149,27 +240,50 @@ def _parse_cocoa_result(result: subprocess.CompletedProcess) -> ApprovalResult:
     return ApprovalResult(approved=None)
 
 
-def _approve_file_macos(script: str, label: str) -> ApprovalResult:
+def _approve_file_macos(script: str, label: str, *, diff: str | None = None) -> ApprovalResult:
     abs_path = os.path.abspath(script)
     line_count = _count_lines(script)
     title = f"[{label}] {os.path.basename(script)}"
-    subtitle = f"{abs_path} — {line_count} lines"
 
-    rtf_content = _render_rtf(abs_path)
     rtf_tmp = None
+    diff_tmp = None
 
-    if rtf_content:
-        rtf_file = tempfile.NamedTemporaryFile(
-            mode="w", suffix=".rtf", delete=False
-        )
-        rtf_file.write(rtf_content)
-        rtf_file.close()
-        rtf_tmp = rtf_file.name
-        load_section = _LOAD_RTF.replace("__RTFPATH__", _escape(rtf_tmp))
-        set_section = _SET_RTF
+    if diff:
+        subtitle = f"{abs_path} — diff ({line_count} lines total)"
+        diff_rtf = _render_diff_rtf(diff)
+        if diff_rtf:
+            diff_file = tempfile.NamedTemporaryFile(
+                mode="w", suffix=".rtf", delete=False
+            )
+            diff_file.write(diff_rtf)
+            diff_file.close()
+            diff_tmp = diff_file.name
+            load_section = _LOAD_RTF.replace("__RTFPATH__", _escape(diff_tmp))
+            set_section = _SET_RTF
+        else:
+            diff_plain = tempfile.NamedTemporaryFile(
+                mode="w", suffix=".diff", delete=False
+            )
+            diff_plain.write(diff)
+            diff_plain.close()
+            diff_tmp = diff_plain.name
+            load_section = _LOAD_PLAIN.replace("__FILEPATH__", _escape(diff_tmp))
+            set_section = _SET_PLAIN
     else:
-        load_section = _LOAD_PLAIN.replace("__FILEPATH__", _escape(abs_path))
-        set_section = _SET_PLAIN
+        subtitle = f"{abs_path} — {line_count} lines"
+        rtf_content = _render_rtf(abs_path)
+        if rtf_content:
+            rtf_file = tempfile.NamedTemporaryFile(
+                mode="w", suffix=".rtf", delete=False
+            )
+            rtf_file.write(rtf_content)
+            rtf_file.close()
+            rtf_tmp = rtf_file.name
+            load_section = _LOAD_RTF.replace("__RTFPATH__", _escape(rtf_tmp))
+            set_section = _SET_RTF
+        else:
+            load_section = _LOAD_PLAIN.replace("__FILEPATH__", _escape(abs_path))
+            set_section = _SET_PLAIN
 
     applescript = (
         _COCOA_FILE_DIALOG
@@ -197,11 +311,12 @@ def _approve_file_macos(script: str, label: str) -> ApprovalResult:
     except (subprocess.TimeoutExpired, OSError):
         return ApprovalResult(approved=None)
     finally:
-        if rtf_tmp:
-            try:
-                os.unlink(rtf_tmp)
-            except OSError:
-                pass
+        for tmp in (rtf_tmp, diff_tmp):
+            if tmp:
+                try:
+                    os.unlink(tmp)
+                except OSError:
+                    pass
 
     return _parse_cocoa_result(result)
 

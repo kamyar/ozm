@@ -9,7 +9,8 @@ import sys
 import click
 
 from ozm.approve import request_cmd_approval
-from ozm.config import add_allowed_command, is_command_allowed, project_key
+from ozm.audit import log as audit_log
+from ozm.config import add_allowed_command, is_command_allowed, is_command_blocked, project_key
 from ozm.run import load_hashes, save_hashes
 
 CMD_PREFIX = "cmd:"
@@ -61,7 +62,14 @@ def cmd_cmd(command_and_args: tuple[str, ...]) -> None:
 
     command = " ".join(command_and_args)
 
+    blocked = is_command_blocked(command)
+    if blocked:
+        audit_log("blocked", "cmd", command)
+        click.echo(f"ozm: blocked by pattern '{blocked}' in .ozm.yaml", err=True)
+        sys.exit(1)
+
     if is_command_allowed(command):
+        audit_log("allowed", "cmd", command)
         result = subprocess.run(command, shell=True)
         sys.exit(result.returncode)
 
@@ -70,6 +78,7 @@ def cmd_cmd(command_and_args: tuple[str, ...]) -> None:
     hashes = load_hashes()
 
     if hashes.get(key) == current_hash:
+        audit_log("allowed", "cmd", command)
         result = subprocess.run(command, shell=True)
         sys.exit(result.returncode)
 
@@ -84,12 +93,14 @@ def cmd_cmd(command_and_args: tuple[str, ...]) -> None:
         run_hash = _cmd_hash(run_command)
         hashes[run_key] = run_hash
         save_hashes(hashes)
+        audit_log("allowed", "cmd", run_command, approval.feedback)
         if run_command != command:
             click.echo(f"ozm: approved cmd (edited)", err=True)
         result = subprocess.run(run_command, shell=True)
         sys.exit(result.returncode)
 
     if approval.approved is False:
+        audit_log("denied", "cmd", command, approval.feedback)
         if approval.feedback:
             click.echo(f"ozm: denied cmd — {approval.feedback}", err=True)
         else:
