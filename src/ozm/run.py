@@ -78,7 +78,7 @@ def run_cmd(script: str, args: tuple[str, ...]) -> None:
     stored_hash = hashes.get(key)
 
     if stored_hash == current_hash:
-        audit_log("allowed", "run", abs_path)
+        audit_log("cached", "run", abs_path)
         ensure_executable(script)
         result = subprocess.run([script, *args])
         sys.exit(result.returncode)
@@ -90,7 +90,7 @@ def run_cmd(script: str, args: tuple[str, ...]) -> None:
     if approval.approved is True:
         hashes[key] = current_hash
         save_hashes(hashes)
-        audit_log("allowed", "run", abs_path, approval.feedback)
+        audit_log("clicked", "run", abs_path, approval.feedback)
         if approval.feedback:
             click.echo(f"ozm: approved {script} — {approval.feedback}", err=True)
         else:
@@ -107,13 +107,10 @@ def run_cmd(script: str, args: tuple[str, ...]) -> None:
             click.echo(f"ozm: denied {script}", err=True)
         sys.exit(1)
 
+    audit_log("no-dialog", "run", abs_path)
     click.echo(f"ozm: [{label}] {script}")
     show_file(script)
-
-    hashes[key] = current_hash
-    save_hashes(hashes)
-
-    click.echo("Review the content above. Run the same command again to execute.")
+    click.echo("No approval dialog available. Run the same command again after review.")
     sys.exit(1)
 
 
