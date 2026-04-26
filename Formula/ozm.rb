@@ -3,8 +3,8 @@ class Ozm < Formula
 
   desc "Content-aware script execution gate and git rule enforcer for AI agents"
   homepage "https://github.com/kamyar/ozm"
-  url "https://files.pythonhosted.org/packages/a6/30/a08da11a9ba39237ef28dd7eb150979d738e3c9be31a226db85570d09b58/ozm-2026.4.26.2.tar.gz"
-  sha256 "1ef64b82ebbce2078af8eec4042efdce0f61d7a86bd7671651c1347057a78bbd"
+  url "https://files.pythonhosted.org/packages/d9/a4/a795fb828d6c020dcdcbbc60a161f54d0c7e07db7308d224dc6195a6f8bc/ozm-2026.4.26.3.tar.gz"
+  sha256 "105d31fae237db5b6ef75779ac861e27d6a44a9bb332bde02eeaa53385e72f57"
   depends_on "python@3.12"
 
   resource "click" do
