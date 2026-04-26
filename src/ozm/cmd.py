@@ -97,8 +97,12 @@ def cmd_cmd(command_and_args: tuple[str, ...]) -> None:
         hashes[run_key] = run_hash
         save_hashes(hashes)
         audit_log("clicked", "cmd", run_command, approval.feedback)
-        if run_command != command:
+        if approval.feedback:
+            click.echo(f"ozm: approved cmd — {approval.feedback}", err=True)
+        elif run_command != command:
             click.echo(f"ozm: approved cmd (edited)", err=True)
+        else:
+            click.echo(f"ozm: approved cmd", err=True)
         result = subprocess.run(run_command, shell=True)
         sys.exit(result.returncode)
 
