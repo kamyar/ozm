@@ -2,12 +2,17 @@
 """Per-project configuration via .ozm.yaml."""
 
 import fnmatch
+import hashlib
 import os
+import sys
 
+import click
 import yaml
 
 
 CONFIG_FILE = ".ozm.yaml"
+OZM_DIR = os.path.expanduser("~/.ozm")
+TRUST_FILE = os.path.join(OZM_DIR, "trusted_configs.yaml")
 
 
 def find_project_root() -> str:
