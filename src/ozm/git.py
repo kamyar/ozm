@@ -104,9 +104,16 @@ def _check_push(args: list[str]) -> None:
         sys.exit(1)
 
     for arg in args:
-        if not arg.startswith("-") and arg in PROTECTED_BRANCHES:
-            click.echo(f"ozm: pushing to '{arg}' is not allowed", err=True)
-            sys.exit(1)
+        if arg.startswith("-"):
+            continue
+        targets = [arg]
+        if ":" in arg:
+            targets.append(arg.split(":", 1)[1])
+        for t in targets:
+            name = t.removeprefix("refs/heads/")
+            if name in PROTECTED_BRANCHES:
+                click.echo(f"ozm: pushing to '{name}' is not allowed", err=True)
+                sys.exit(1)
 
 
 @click.command(
