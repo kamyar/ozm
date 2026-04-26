@@ -112,5 +112,11 @@ def cmd_cmd(command_and_args: tuple[str, ...]) -> None:
     click.echo(f"ozm: {command}")
     if approval.feedback:
         click.echo(f"ozm: dialog error: {approval.feedback}", err=True)
-    click.echo("No approval dialog available. Review the command above.")
+    click.echo(
+        "ozm: BLOCKED — approval dialog could not be displayed. "
+        "The command was NOT executed. "
+        "Do NOT retry. "
+        "Tell the user ozm needs a macOS GUI session to approve this command.",
+        err=True,
+    )
     sys.exit(1)

