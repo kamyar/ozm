@@ -7,8 +7,6 @@ import subprocess
 import tempfile
 from typing import NamedTuple
 
-import click
-
 
 class ApprovalResult(NamedTuple):
     approved: bool | None
@@ -38,7 +36,7 @@ def request_approval(script: str, label: str) -> ApprovalResult:
         result = _approve_file_macos(script, label, diff=diff)
         if result.approved is not None:
             return result
-    return _approve_file_tty(script, label)
+    return ApprovalResult(approved=None)
 
 
 def request_cmd_approval(command: str) -> ApprovalResult:
@@ -47,36 +45,7 @@ def request_cmd_approval(command: str) -> ApprovalResult:
         result = _approve_cmd_macos(command)
         if result.approved is not None:
             return result
-    return _approve_cmd_tty(command)
-
-
-def _approve_file_tty(script: str, label: str) -> ApprovalResult:
-    import sys
-    if not sys.stdin.isatty():
-        return ApprovalResult(approved=None)
-    line_count = _count_lines(script)
-    click.echo(f"\nozm: [{label}] {script} ({line_count} lines)")
-    with open(script) as f:
-        for i, line in enumerate(f, 1):
-            click.echo(f"  {i:>4} | {line}", nl=False)
-    click.echo()
-    try:
-        answer = input("ozm: allow? [y/N] ").strip().lower()
-    except (EOFError, KeyboardInterrupt):
-        return ApprovalResult(approved=False)
-    return ApprovalResult(approved=answer in ("y", "yes"))
-
-
-def _approve_cmd_tty(command: str) -> ApprovalResult:
-    import sys
-    if not sys.stdin.isatty():
-        return ApprovalResult(approved=None)
-    click.echo(f"\nozm: command: {command}")
-    try:
-        answer = input("ozm: allow? [y/N] ").strip().lower()
-    except (EOFError, KeyboardInterrupt):
-        return ApprovalResult(approved=False)
-    return ApprovalResult(approved=answer in ("y", "yes"))
+    return ApprovalResult(approved=None)
 
 
 def _count_lines(path: str) -> int:

@@ -30,8 +30,16 @@ flowchart LR
 
 ## Install
 
-```
+```bash
+# via Homebrew
+brew tap kamyar/ozm https://github.com/kamyar/ozm
+brew install ozm
+
+# or via uv
 uv tool install ozm
+
+# or via pip
+pip install ozm
 ```
 
 ## Quick start
