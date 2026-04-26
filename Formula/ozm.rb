@@ -28,5 +28,6 @@ class Ozm < Formula
 
   test do
     assert_match "Content-aware script execution gate", shell_output("#{bin}/ozm --help")
+    assert_match version.to_s, shell_output("#{bin}/ozm version")
   end
 end

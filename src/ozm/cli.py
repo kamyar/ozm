@@ -3,6 +3,7 @@
 import os
 import shutil
 import subprocess
+from importlib.metadata import version as pkg_version
 
 import click
 
@@ -15,6 +16,9 @@ from ozm.doctor import doctor_cmd
 
 
 def _get_version() -> str:
+    v = pkg_version("ozm")
+    if v and v != "0.0.0":
+        return v
     src = os.path.dirname(os.path.abspath(__file__))
     try:
         result = subprocess.run(
@@ -22,21 +26,21 @@ def _get_version() -> str:
             capture_output=True, text=True, timeout=3, cwd=src,
         )
         if result.returncode == 0 and result.stdout.strip():
-            return result.stdout.strip()
+            return f"dev ({result.stdout.strip()})"
     except (subprocess.TimeoutExpired, OSError):
         pass
-    return "unknown"
+    return "dev"
 
 
 @click.group()
-@click.version_option(version="dev", prog_name="ozm")
+@click.version_option(version=_get_version(), prog_name="ozm")
 def cli():
     """Content-aware script execution gate and git rule enforcer."""
 
 
 @click.command("version")
 def version_cmd() -> None:
-    """Show ozm version (git commit and date)."""
+    """Show ozm version."""
     click.echo(f"ozm {_get_version()}")
 
 
