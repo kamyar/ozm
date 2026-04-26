@@ -7,6 +7,8 @@ import sys
 
 import click
 
+from ozm.approve import request_override
+from ozm.audit import log as audit_log
 from ozm.config import commit_config
 
 MAX_SUBJECT_LENGTH = 72
@@ -53,7 +55,8 @@ def validate_message(message: str) -> list[str]:
     return errors
 
 
-def _check_commit(args: list[str]) -> None:
+def _check_commit(args: list[str]) -> str | None:
+    """Return a violation string if blocked, None if ok."""
     message = extract_message(args)
     if message:
         errors = validate_message(message)
@@ -64,44 +67,33 @@ def _check_commit(args: list[str]) -> None:
             errors.append("Co-Authored-By attribution is not allowed in this project")
 
         if errors:
-            click.echo("ozm: commit blocked:", err=True)
-            for e in errors:
-                click.echo(f"  - {e}", err=True)
-            sys.exit(1)
+            return "; ".join(errors)
 
     cfg = commit_config()
     branch = get_current_branch()
 
     if cfg.get("require_branch") and branch in PROTECTED_BRANCHES:
-        click.echo(
-            f"ozm: commit blocked: committing directly to '{branch}' is not allowed",
-            err=True,
-        )
-        sys.exit(1)
+        return f"committing directly to '{branch}' is not allowed"
 
     prefixes = cfg.get("branch_prefixes")
     if isinstance(prefixes, list) and prefixes and branch:
         if branch not in PROTECTED_BRANCHES and not any(
             branch.startswith(p) for p in prefixes
         ):
-            click.echo(
-                f"ozm: commit blocked: branch '{branch}' does not match "
-                f"required prefixes: {', '.join(prefixes)}",
-                err=True,
-            )
-            sys.exit(1)
+            return f"branch '{branch}' does not match required prefixes: {', '.join(prefixes)}"
+
+    return None
 
 
-def _check_push(args: list[str]) -> None:
+def _check_push(args: list[str]) -> str | None:
+    """Return a violation string if blocked, None if ok."""
     force_flags = {"--force", "-f"}
     if any(a in force_flags for a in args):
-        click.echo("ozm: force push is not allowed", err=True)
-        sys.exit(1)
+        return "force push is not allowed"
 
     branch = get_current_branch()
     if branch in PROTECTED_BRANCHES:
-        click.echo(f"ozm: pushing to '{branch}' is not allowed", err=True)
-        sys.exit(1)
+        return f"pushing to '{branch}' is not allowed"
 
     for arg in args:
         if arg.startswith("-"):
@@ -112,8 +104,61 @@ def _check_push(args: list[str]) -> None:
         for t in targets:
             name = t.removeprefix("refs/heads/")
             if name in PROTECTED_BRANCHES:
-                click.echo(f"ozm: pushing to '{name}' is not allowed", err=True)
-                sys.exit(1)
+                return f"pushing to '{name}' is not allowed"
+
+    return None
+
+
+def _extract_reason(args: list[str]) -> tuple[list[str], str | None]:
+    """Extract --reason from args, return (remaining_args, reason)."""
+    cleaned = []
+    reason = None
+    i = 0
+    while i < len(args):
+        if args[i] == "--reason" and i + 1 < len(args):
+            reason = args[i + 1]
+            i += 2
+        elif args[i].startswith("--reason="):
+            reason = args[i].split("=", 1)[1]
+            i += 1
+        else:
+            cleaned.append(args[i])
+            i += 1
+    return cleaned, reason
+
+
+def _handle_violation(violation: str, command: str, reason: str | None) -> None:
+    """Block or show override dialog. Exits on block/deny."""
+    if not reason:
+        click.echo(f"ozm: {violation}", err=True)
+        click.echo("ozm: use --reason \"justification\" to request a one-time override", err=True)
+        sys.exit(1)
+
+    approval = request_override(command, violation, reason)
+
+    if approval.approved is True:
+        audit_log("override", "git", command, approval.feedback)
+        if approval.feedback:
+            click.echo(f"ozm: override granted — {approval.feedback}", err=True)
+        else:
+            click.echo("ozm: override granted (one-time)", err=True)
+        return
+
+    if approval.approved is False:
+        audit_log("denied", "git", command, approval.feedback)
+        if approval.feedback:
+            click.echo(f"ozm: override denied — {approval.feedback}", err=True)
+        else:
+            click.echo("ozm: override denied", err=True)
+        sys.exit(1)
+
+    audit_log("no-dialog", "git", command)
+    click.echo(
+        "ozm: BLOCKED — approval dialog could not be displayed. "
+        "Do NOT retry.",
+        err=True,
+    )
+    sys.exit(1)
 
 
 @click.command(
@@ -129,11 +174,19 @@ def git_cmd(args: tuple[str, ...]) -> None:
 
     subcmd = args[0]
     rest = list(args[1:])
+    rest, reason = _extract_reason(rest)
 
     if subcmd == "commit":
-        _check_commit(rest)
-    elif subcmd == "push":
-        _check_push(rest)
+        violation = _check_commit(rest)
+        if violation:
+            full_cmd = f"git {subcmd} {' '.join(rest)}"
+            _handle_violation(violation, full_cmd, reason)
 
-    result = subprocess.run(["git", *args])
+    elif subcmd == "push":
+        violation = _check_push(rest)
+        if violation:
+            full_cmd = f"git {subcmd} {' '.join(rest)}"
+            _handle_violation(violation, full_cmd, reason)
+
+    result = subprocess.run(["git", subcmd, *rest])
     sys.exit(result.returncode)

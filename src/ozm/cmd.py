@@ -8,7 +8,7 @@ import sys
 
 import click
 
-from ozm.approve import request_cmd_approval
+from ozm.approve import request_cmd_approval, request_override
 from ozm.audit import log as audit_log
 from ozm.config import add_allowed_command, is_command_allowed, is_command_blocked, project_key
 from ozm.run import load_hashes, save_hashes
@@ -51,7 +51,20 @@ def cmd_cmd(command_and_args: tuple[str, ...]) -> None:
     if not command_and_args:
         raise click.ClickException("Nothing to run.")
 
-    match = _find_script_in_args(command_and_args)
+    args = list(command_and_args)
+    reason = None
+    if "--reason" in args:
+        idx = args.index("--reason")
+        if idx + 1 < len(args):
+            reason = args[idx + 1]
+            args = args[:idx] + args[idx + 2:]
+    for i, a in enumerate(list(args)):
+        if a.startswith("--reason="):
+            reason = a.split("=", 1)[1]
+            args.pop(i)
+            break
+
+    match = _find_script_in_args(tuple(args))
     if match:
         script, shebang = match
         click.echo(
@@ -61,13 +74,23 @@ def cmd_cmd(command_and_args: tuple[str, ...]) -> None:
         )
         sys.exit(1)
 
-    command = " ".join(command_and_args)
+    command = " ".join(args)
 
     blocked = is_command_blocked(command)
     if blocked:
-        audit_log("blocked", "cmd", command)
-        click.echo(f"ozm: blocked by pattern '{blocked}' in .ozm.yaml", err=True)
-        sys.exit(1)
+        if not reason:
+            audit_log("blocked", "cmd", command)
+            click.echo(f"ozm: blocked by pattern '{blocked}' in .ozm.yaml", err=True)
+            click.echo("ozm: use --reason \"justification\" to request a one-time override", err=True)
+            sys.exit(1)
+        approval = request_override(command, f"blocked by pattern '{blocked}'", reason)
+        if approval.approved is True:
+            audit_log("override", "cmd", command, approval.feedback)
+            click.echo("ozm: override granted (one-time)", err=True)
+        else:
+            audit_log("denied", "cmd", command, approval.feedback)
+            click.echo("ozm: override denied", err=True)
+            sys.exit(1)
 
     if is_command_allowed(command):
         audit_log("config", "cmd", command)

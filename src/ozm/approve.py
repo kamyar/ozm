@@ -44,6 +44,13 @@ def request_cmd_approval(command: str) -> ApprovalResult:
     return ApprovalResult(approved=None)
 
 
+def request_override(command: str, violation: str, reason: str) -> ApprovalResult:
+    """Ask the user for a one-time override of a blocked operation."""
+    if platform.system() == "Darwin":
+        return _override_macos(command, violation, reason)
+    return ApprovalResult(approved=None)
+
+
 def _count_lines(path: str) -> int:
     with open(path) as f:
         return sum(1 for _ in f)
@@ -399,3 +406,79 @@ def _approve_cmd_macos(command: str) -> ApprovalResult:
         return ApprovalResult(approved=None)
 
     return _parse_cmd_result(result)
+
+
+_COCOA_OVERRIDE_DIALOG = '''\
+use framework "Cocoa"
+use scripting additions
+
+current application's NSApplication's sharedApplication()
+current application's NSApp's setActivationPolicy:(current application's NSApplicationActivationPolicyRegular)
+current application's NSApp's activateIgnoringOtherApps:true
+
+set alert to current application's NSAlert's alloc()'s init()
+alert's setMessageText:"Override: __VIOLATION__"
+alert's setInformativeText:"__COMMAND__"
+alert's setAlertStyle:(current application's NSAlertStyleCritical)
+alert's addButtonWithTitle:"Allow Once"
+alert's addButtonWithTitle:"Deny"
+
+set accessory to current application's NSView's alloc()'s initWithFrame:(current application's NSMakeRect(0, 0, 560, 105))
+
+set reasonLabel to current application's NSTextField's labelWithString:"Agent reasoning:"
+reasonLabel's setFrame:(current application's NSMakeRect(0, 82, 560, 16))
+reasonLabel's setFont:(current application's NSFont's systemFontOfSize:11)
+reasonLabel's setTextColor:(current application's NSColor's secondaryLabelColor())
+accessory's addSubview:reasonLabel
+
+set reasonField to current application's NSTextField's wrappingLabelWithString:"__REASON__"
+reasonField's setFrame:(current application's NSMakeRect(0, 35, 560, 45))
+reasonField's setFont:(current application's NSFont's systemFontOfSize:12)
+accessory's addSubview:reasonField
+
+set fb to current application's NSTextField's alloc()'s initWithFrame:(current application's NSMakeRect(0, 5, 560, 24))
+fb's setPlaceholderString:"Feedback for the agent..."
+accessory's addSubview:fb
+
+alert's setAccessoryView:accessory
+alert's |window|()'s setInitialFirstResponder:fb
+alert's |window|()'s setLevel:(current application's NSFloatingWindowLevel)
+
+set response to alert's runModal()
+set feedback to fb's stringValue() as text
+
+if response = (current application's NSAlertFirstButtonReturn) as integer then
+    return "ALLOW:" & feedback
+else
+    return "DENY:" & feedback
+end if
+'''
+
+
+def _override_macos(command: str, violation: str, reason: str) -> ApprovalResult:
+    applescript = (
+        _COCOA_OVERRIDE_DIALOG
+        .replace("__VIOLATION__", _escape(violation))
+        .replace("__COMMAND__", _escape(command))
+        .replace("__REASON__", _escape(reason))
+    )
+
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".applescript", delete=False
+        ) as f:
+            f.write(applescript)
+            tmp = f.name
+        try:
+            result = subprocess.run(
+                ["osascript", tmp],
+                capture_output=True,
+                text=True,
+                timeout=300,
+            )
+        finally:
+            os.unlink(tmp)
+    except (subprocess.TimeoutExpired, OSError):
+        return ApprovalResult(approved=None)
+
+    return _parse_cocoa_result(result)

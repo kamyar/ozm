@@ -67,6 +67,15 @@ All script execution and git operations must go through `ozm`.
 Always include a shebang line (e.g. `#!/usr/bin/env python3`, `#!/usr/bin/env bash`) as the first line of any script you create. This allows `ozm run` to execute it directly. Never use `ozm cmd python script.py` or `ozm cmd uv run python script.py` — use `ozm run script.py` instead.
 
 Keep commit messages short. No heredoc/EOF patterns. Simple `-m "message"` only.
+
+## Override blocked operations
+
+If a command is blocked but you believe it's necessary, use `--reason` to request a one-time override from the user:
+
+    ozm git push --reason "Hotfix for production outage, needs to go to main"
+    ozm cmd rm -rf build/ --reason "Clean build artifacts before rebuild"
+
+The user sees your reasoning in a dialog and can approve once. This is never cached or added to allowlists.
 """
 
 AGENTS_MD = """# ozm — script execution gate
@@ -85,6 +94,15 @@ All script execution and git operations must go through `ozm`.
 Always include a shebang line (e.g. `#!/usr/bin/env python3`, `#!/usr/bin/env bash`) as the first line of any script you create. This allows `ozm run` to execute it directly. Never use `ozm cmd python script.py` or `ozm cmd uv run python script.py` — use `ozm run script.py` instead.
 
 Keep commit messages short. No heredoc/EOF patterns. Simple `-m "message"` only.
+
+## Override blocked operations
+
+If a command is blocked but you believe it's necessary, use `--reason` to request a one-time override from the user:
+
+    ozm git push --reason "Hotfix for production outage, needs to go to main"
+    ozm cmd rm -rf build/ --reason "Clean build artifacts before rebuild"
+
+The user sees your reasoning in a dialog and can approve once. This is never cached or added to allowlists.
 """
 
 CLAUDE_HOOKS_CONFIG = {
