@@ -305,15 +305,15 @@ alert's setAlertStyle:(current application's NSAlertStyleWarning)
 alert's addButtonWithTitle:"Allow"
 alert's addButtonWithTitle:"Deny"
 
-set accessory to current application's NSView's alloc()'s initWithFrame:(current application's NSMakeRect(0, 0, 560, 155))
+set accessory to current application's NSView's alloc()'s initWithFrame:(current application's NSMakeRect(0, 0, 560, 190))
 
 set cmdLabel to current application's NSTextField's labelWithString:"Run:"
-cmdLabel's setFrame:(current application's NSMakeRect(0, 132, 560, 16))
+cmdLabel's setFrame:(current application's NSMakeRect(0, 167, 560, 16))
 cmdLabel's setFont:(current application's NSFont's systemFontOfSize:11)
 cmdLabel's setTextColor:(current application's NSColor's secondaryLabelColor())
 accessory's addSubview:cmdLabel
 
-set cmdScroll to current application's NSScrollView's alloc()'s initWithFrame:(current application's NSMakeRect(0, 55, 560, 75))
+set cmdScroll to current application's NSScrollView's alloc()'s initWithFrame:(current application's NSMakeRect(0, 90, 560, 75))
 cmdScroll's setHasVerticalScroller:true
 cmdScroll's setBorderType:(current application's NSBezelBorder)
 set cmdSize to cmdScroll's contentSize()
@@ -327,15 +327,19 @@ cmdScroll's setDocumentView:cmdField
 accessory's addSubview:cmdScroll
 
 set patLabel to current application's NSTextField's labelWithString:"Allow pattern (saved to .ozm.yaml):"
-patLabel's setFrame:(current application's NSMakeRect(0, 32, 560, 16))
+patLabel's setFrame:(current application's NSMakeRect(0, 67, 560, 16))
 patLabel's setFont:(current application's NSFont's systemFontOfSize:11)
 patLabel's setTextColor:(current application's NSColor's secondaryLabelColor())
 accessory's addSubview:patLabel
 
-set patField to current application's NSTextField's alloc()'s initWithFrame:(current application's NSMakeRect(0, 7, 560, 24))
+set patField to current application's NSTextField's alloc()'s initWithFrame:(current application's NSMakeRect(0, 42, 560, 24))
 patField's setPlaceholderString:"e.g. curl httpbin.org/*"
 patField's setFont:(current application's NSFont's fontWithName:"Menlo" |size|:12)
 accessory's addSubview:patField
+
+set fb to current application's NSTextField's alloc()'s initWithFrame:(current application's NSMakeRect(0, 5, 560, 24))
+fb's setPlaceholderString:"Feedback for the agent..."
+accessory's addSubview:fb
 
 alert's setAccessoryView:accessory
 alert's |window|()'s setInitialFirstResponder:cmdField
@@ -344,12 +348,13 @@ alert's |window|()'s setLevel:(current application's NSFloatingWindowLevel)
 set response to alert's runModal()
 set editedCmd to cmdField's |string|() as text
 set pattern to patField's stringValue() as text
+set feedback to fb's stringValue() as text
 set sep to "%%OZM_SEP%%"
 
 if response = (current application's NSAlertFirstButtonReturn) as integer then
-    return "ALLOW:" & editedCmd & sep & pattern
+    return "ALLOW:" & editedCmd & sep & pattern & sep & feedback
 else
-    return "DENY:" & editedCmd & sep & pattern
+    return "DENY:" & editedCmd & sep & pattern & sep & feedback
 end if
 '''
 
@@ -364,10 +369,11 @@ def _parse_cmd_result(result: subprocess.CompletedProcess) -> ApprovalResult:
     for prefix, approved in [("ALLOW:", True), ("DENY:", False)]:
         if output.startswith(prefix):
             rest = output[len(prefix):]
-            parts = rest.split("%%OZM_SEP%%", 1)
+            parts = rest.split("%%OZM_SEP%%", 2)
             cmd = parts[0].replace("\n", " ").strip() or None
             pattern = parts[1].strip() if len(parts) > 1 and parts[1].strip() else None
-            return ApprovalResult(approved=approved, command=cmd, allow_pattern=pattern)
+            feedback = parts[2].strip() if len(parts) > 2 and parts[2].strip() else None
+            return ApprovalResult(approved=approved, feedback=feedback, command=cmd, allow_pattern=pattern)
     return ApprovalResult(approved=None)
 
 
