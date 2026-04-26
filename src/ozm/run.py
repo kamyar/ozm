@@ -107,9 +107,11 @@ def run_cmd(script: str, args: tuple[str, ...]) -> None:
             click.echo(f"ozm: denied {script}", err=True)
         sys.exit(1)
 
-    audit_log("no-dialog", "run", abs_path)
+    audit_log("no-dialog", "run", abs_path, approval.feedback)
     click.echo(f"ozm: [{label}] {script}")
     show_file(script)
+    if approval.feedback:
+        click.echo(f"ozm: dialog error: {approval.feedback}", err=True)
     click.echo("No approval dialog available. Run the same command again after review.")
     sys.exit(1)
 
