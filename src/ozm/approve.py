@@ -33,18 +33,14 @@ def request_approval(script: str, label: str) -> ApprovalResult:
     """Ask the user to review and approve a script via OS-native UI."""
     diff = _get_git_diff(script) if label == "CHANGED" else None
     if platform.system() == "Darwin":
-        result = _approve_file_macos(script, label, diff=diff)
-        if result.approved is not None:
-            return result
+        return _approve_file_macos(script, label, diff=diff)
     return ApprovalResult(approved=None)
 
 
 def request_cmd_approval(command: str) -> ApprovalResult:
     """Ask the user to approve an arbitrary command via OS-native dialog."""
     if platform.system() == "Darwin":
-        result = _approve_cmd_macos(command)
-        if result.approved is not None:
-            return result
+        return _approve_cmd_macos(command)
     return ApprovalResult(approved=None)
 
 
