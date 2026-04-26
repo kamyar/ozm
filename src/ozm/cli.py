@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import os
+import shutil
 
 import click
 
@@ -19,14 +20,30 @@ def cli():
 
 @click.command("trust")
 def trust_cmd() -> None:
-    """Trust the .ozm.yaml in the current project."""
-    from ozm.config import find_project_root, trust_config, CONFIG_FILE
+    """Snapshot the in-repo .ozm.yaml into ~/.ozm/projects/ (user-owned)."""
+    from ozm.config import find_project_root, _project_config_path, PROJECTS_DIR
     root = find_project_root()
-    path = os.path.join(root, CONFIG_FILE)
-    if not os.path.isfile(path):
-        raise click.ClickException(f"No {CONFIG_FILE} found in {root}")
-    trust_config(path)
-    click.echo(f"ozm: trusted {path}")
+    repo_config = os.path.join(root, ".ozm.yaml")
+    if not os.path.isfile(repo_config):
+        raise click.ClickException(f"No .ozm.yaml found in {root}")
+    dest = _project_config_path()
+    os.makedirs(PROJECTS_DIR, exist_ok=True)
+    shutil.copy2(repo_config, dest)
+    click.echo(f"ozm: copied {repo_config} -> {dest}")
+
+
+@click.command("config")
+def config_cmd() -> None:
+    """Show the path to this project's user-owned config."""
+    from ozm.config import _project_config_path, find_project_root
+    root = find_project_root()
+    path = _project_config_path()
+    click.echo(f"project: {root}")
+    click.echo(f"config:  {path}")
+    if os.path.isfile(path):
+        click.echo(f"status:  exists")
+    else:
+        click.echo(f"status:  not found — run 'ozm trust' to import .ozm.yaml")
 
 
 cli.add_command(run_cmd, "run")
@@ -38,3 +55,4 @@ cli.add_command(cmd_cmd, "cmd")
 cli.add_command(log_cmd, "log")
 cli.add_command(doctor_cmd, "doctor")
 cli.add_command(trust_cmd, "trust")
+cli.add_command(config_cmd, "config")

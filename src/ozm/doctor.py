@@ -56,12 +56,11 @@ def _check_pygments() -> tuple[bool, str]:
 
 
 def _check_project_config() -> tuple[bool, str]:
-    from ozm.config import find_project_root, CONFIG_FILE
-    root = find_project_root()
-    path = os.path.join(root, CONFIG_FILE)
+    from ozm.config import _project_config_path
+    path = _project_config_path()
     if os.path.isfile(path):
-        return True, f".ozm.yaml found at {path}"
-    return True, "no .ozm.yaml in project (using defaults)"
+        return True, f"config at {path}"
+    return False, f"no config — run 'ozm trust' to import .ozm.yaml"
 
 
 @click.command("doctor")

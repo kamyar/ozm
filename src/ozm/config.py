@@ -1,27 +1,27 @@
 #!/usr/bin/env python3
-"""Per-project configuration via .ozm.yaml."""
+"""Per-project configuration from ~/.ozm/projects/.
+
+Config files live exclusively in ~/.ozm/projects/<name>-<hash>.yaml.
+In-repo .ozm.yaml is never read at runtime — use `ozm trust` to
+snapshot it into ~/.ozm/projects/.
+"""
 
 import fnmatch
 import hashlib
 import os
-import sys
 
-import click
 import yaml
 
 
-CONFIG_FILE = ".ozm.yaml"
 OZM_DIR = os.path.expanduser("~/.ozm")
-TRUST_FILE = os.path.join(OZM_DIR, "trusted_configs.yaml")
+PROJECTS_DIR = os.path.join(OZM_DIR, "projects")
 
 
 def find_project_root() -> str:
-    """Walk up from cwd to find directory containing .ozm.yaml or .git, else cwd."""
+    """Walk up from cwd to find directory containing .git, else cwd."""
     d = os.getcwd()
     while True:
-        if os.path.exists(os.path.join(d, CONFIG_FILE)) or os.path.exists(
-            os.path.join(d, ".git")
-        ):
+        if os.path.exists(os.path.join(d, ".git")):
             return d
         parent = os.path.dirname(d)
         if parent == d:
@@ -29,70 +29,15 @@ def find_project_root() -> str:
         d = parent
 
 
-def _config_hash(path: str) -> str:
-    with open(path, "rb") as f:
-        return hashlib.sha256(f.read()).hexdigest()
-
-
-def _load_trusted() -> dict[str, str]:
-    if os.path.exists(TRUST_FILE):
-        with open(TRUST_FILE) as f:
-            data = yaml.safe_load(f)
-            return data if isinstance(data, dict) else {}
-    return {}
-
-
-def _save_trusted(trusted: dict[str, str]) -> None:
-    os.makedirs(OZM_DIR, exist_ok=True)
-    with open(TRUST_FILE, "w") as f:
-        yaml.dump(trusted, f, default_flow_style=False, sort_keys=True)
-
-
-def trust_config(path: str) -> None:
-    """Mark a config file as trusted at its current hash."""
-    trusted = _load_trusted()
-    trusted[os.path.abspath(path)] = _config_hash(path)
-    _save_trusted(trusted)
-
-
-def check_config_trust(path: str) -> bool:
-    """Return True if the config at path is trusted (hash matches)."""
-    abs_path = os.path.abspath(path)
-    trusted = _load_trusted()
-    stored = trusted.get(abs_path)
-    if stored is None:
-        return False
-    return stored == _config_hash(path)
-
-
-def _warn_untrusted(path: str) -> dict:
-    """Warn about untrusted config. Returns empty dict if user declines trust."""
-    if not sys.stdin.isatty():
-        click.echo(f"ozm: untrusted config {path} — run interactively to trust", err=True)
-        return {}
-    click.echo(f"\nozm: new or modified config detected: {path}", err=True)
-    with open(path) as f:
-        for line in f:
-            click.echo(f"  {line}", nl=False, err=True)
-    click.echo(err=True)
-    try:
-        answer = input("ozm: trust this config? [y/N] ").strip().lower()
-    except (EOFError, KeyboardInterrupt):
-        return {}
-    if answer in ("y", "yes"):
-        trust_config(path)
-        click.echo("ozm: config trusted", err=True)
-        with open(path) as f:
-            data = yaml.safe_load(f)
-            return data if isinstance(data, dict) else {}
-    click.echo("ozm: config ignored — using defaults", err=True)
-    return {}
-
-
-def _load_raw_config() -> dict:
-    """Load .ozm.yaml without trust checks. For internal use only."""
+def _project_config_path() -> str:
+    """Path to the user-owned config for the current project in ~/.ozm/projects/."""
     root = find_project_root()
-    path = os.path.join(root, CONFIG_FILE)
+    slug = hashlib.sha256(root.encode()).hexdigest()[:16]
+    name = os.path.basename(root)
+    return os.path.join(PROJECTS_DIR, f"{name}-{slug}.yaml")
+
+
+def _load_yaml(path: str) -> dict:
     if not os.path.exists(path):
         return {}
     with open(path) as f:
@@ -101,21 +46,21 @@ def _load_raw_config() -> dict:
 
 
 def load_project_config() -> dict:
-    """Load .ozm.yaml from the project root. Returns empty dict if missing or untrusted."""
-    root = find_project_root()
-    path = os.path.join(root, CONFIG_FILE)
-    if not os.path.exists(path):
-        return {}
-    if not check_config_trust(path):
-        return _warn_untrusted(path)
-    with open(path) as f:
-        data = yaml.safe_load(f)
-        return data if isinstance(data, dict) else {}
+    """Load config from ~/.ozm/projects/. Never reads in-repo files."""
+    return _load_yaml(_project_config_path())
+
+
+def _save_user_config(config: dict) -> None:
+    """Save to the user-owned config file in ~/.ozm/projects/."""
+    path = _project_config_path()
+    os.makedirs(PROJECTS_DIR, exist_ok=True)
+    with open(path, "w") as f:
+        yaml.dump(config, f, default_flow_style=False, sort_keys=False)
 
 
 def is_command_blocked(command: str) -> str | None:
-    """Check if a command matches any pattern in blocked_commands. Returns the matching pattern or None."""
-    config = _load_raw_config()
+    """Check if a command matches any pattern in blocked_commands."""
+    config = load_project_config()
     patterns = config.get("blocked_commands", [])
     if not isinstance(patterns, list):
         return None
@@ -130,7 +75,7 @@ def is_command_blocked(command: str) -> str | None:
 
 def is_command_allowed(command: str) -> bool:
     """Check if a command matches any pattern in the project's allowed_commands."""
-    config = _load_raw_config()
+    config = load_project_config()
     patterns = config.get("allowed_commands", [])
     if not isinstance(patterns, list):
         return False
@@ -144,9 +89,7 @@ def is_command_allowed(command: str) -> bool:
 
 
 def add_allowed_command(pattern: str) -> None:
-    """Append a pattern to allowed_commands in .ozm.yaml."""
-    root = find_project_root()
-    path = os.path.join(root, CONFIG_FILE)
+    """Append a pattern to allowed_commands in the user-owned config."""
     config = load_project_config()
     commands = config.get("allowed_commands", [])
     if not isinstance(commands, list):
@@ -154,13 +97,11 @@ def add_allowed_command(pattern: str) -> None:
     if pattern not in commands:
         commands.append(pattern)
         config["allowed_commands"] = commands
-        with open(path, "w") as f:
-            yaml.dump(config, f, default_flow_style=False, sort_keys=False)
-        trust_config(path)
+        _save_user_config(config)
 
 
 def commit_config() -> dict:
-    """Return the 'commit' section of .ozm.yaml, or empty dict."""
+    """Return the 'commit' section of the config."""
     config = load_project_config()
     section = config.get("commit", {})
     return section if isinstance(section, dict) else {}
