@@ -137,6 +137,24 @@ set attrString to current application's NSAttributedString's alloc()'s initWithR
 tv's textStorage()'s setAttributedString:attrString
 '''
 
+# Standard Edit menu so Cmd+C/V/A/X work in all dialogs
+_EDIT_MENU = '''\
+set menuBar to current application's NSMenu's alloc()'s init()
+set editMenuItem to current application's NSMenuItem's alloc()'s init()
+menuBar's addItem:editMenuItem
+set editMenu to current application's NSMenu's alloc()'s initWithTitle:"Edit"
+set cutItem to (current application's NSMenuItem's alloc()'s initWithTitle:"Cut" action:"cut:" keyEquivalent:"x")
+set copyItem to (current application's NSMenuItem's alloc()'s initWithTitle:"Copy" action:"copy:" keyEquivalent:"c")
+set pasteItem to (current application's NSMenuItem's alloc()'s initWithTitle:"Paste" action:"paste:" keyEquivalent:"v")
+set selectAllItem to (current application's NSMenuItem's alloc()'s initWithTitle:"Select All" action:"selectAll:" keyEquivalent:"a")
+editMenu's addItem:cutItem
+editMenu's addItem:copyItem
+editMenu's addItem:pasteItem
+editMenu's addItem:selectAllItem
+editMenuItem's setSubmenu:editMenu
+current application's NSApp's setMainMenu:menuBar
+'''
+
 # NSAlert with a scrollable read-only text view + feedback field
 _COCOA_FILE_DIALOG = '''\
 use framework "Cocoa"
@@ -145,6 +163,8 @@ use scripting additions
 current application's NSApplication's sharedApplication()
 current application's NSApp's setActivationPolicy:(current application's NSApplicationActivationPolicyRegular)
 current application's NSApp's activateIgnoringOtherApps:true
+
+''' + _EDIT_MENU + '''\
 
 __LOAD_CONTENT__
 
@@ -305,6 +325,8 @@ current application's NSApplication's sharedApplication()
 current application's NSApp's setActivationPolicy:(current application's NSApplicationActivationPolicyRegular)
 current application's NSApp's activateIgnoringOtherApps:true
 
+''' + _EDIT_MENU + '''\
+
 set alert to current application's NSAlert's alloc()'s init()
 alert's setMessageText:"Command"
 alert's setInformativeText:"Edit the command or add an allowlist pattern."
@@ -415,6 +437,8 @@ use scripting additions
 current application's NSApplication's sharedApplication()
 current application's NSApp's setActivationPolicy:(current application's NSApplicationActivationPolicyRegular)
 current application's NSApp's activateIgnoringOtherApps:true
+
+''' + _EDIT_MENU + '''\
 
 set alert to current application's NSAlert's alloc()'s init()
 alert's setMessageText:"Override: __VIOLATION__"
