@@ -87,8 +87,8 @@ def _check_commit(args: list[str]) -> str | None:
 
 def _check_push(args: list[str]) -> str | None:
     """Return a violation string if blocked, None if ok."""
-    force_flags = {"--force", "-f"}
-    if any(a in force_flags for a in args):
+    force_flags = {"-f"}
+    if any(a in force_flags or a.startswith("--force") for a in args):
         return "force push is not allowed"
 
     branch = get_current_branch()
@@ -102,7 +102,7 @@ def _check_push(args: list[str]) -> str | None:
         if ":" in arg:
             targets.append(arg.split(":", 1)[1])
         for t in targets:
-            name = t.removeprefix("refs/heads/")
+            name = t.removeprefix("+").removeprefix("refs/heads/")
             if name in PROTECTED_BRANCHES:
                 return f"pushing to '{name}' is not allowed"
 
