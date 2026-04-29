@@ -10,6 +10,7 @@ import click
 from ozm.install import ENFORCE_HOOK
 
 CLAUDE_SETTINGS = os.path.expanduser("~/.claude/settings.json")
+OZM_MARKER = "ozm — script execution gate"
 
 
 def _check_ozm_on_path() -> tuple[bool, str]:
@@ -47,6 +48,31 @@ def _check_claude_settings() -> tuple[bool, str]:
     return False, "ozm hook not found in settings.json — run 'ozm install'"
 
 
+def _check_codex_project_docs() -> tuple[bool, str]:
+    agents_path = os.path.join(os.getcwd(), "AGENTS.md")
+    if not os.path.isfile(agents_path):
+        return (
+            False,
+            "AGENTS.md missing in this project — run 'ozm install --project' "
+            "before starting Codex here",
+        )
+    try:
+        with open(agents_path) as f:
+            content = f.read()
+    except OSError as e:
+        return False, f"AGENTS.md unreadable: {e}"
+    if OZM_MARKER in content:
+        return True, "AGENTS.md contains ozm instructions"
+    return False, "AGENTS.md exists but does not mention ozm — run 'ozm install --project'"
+
+
+def _check_codex_enforcement() -> tuple[bool | None, str]:
+    return (
+        None,
+        "Codex has no ozm hook; AGENTS.md is advisory and is read when a session starts",
+    )
+
+
 def _check_pygments() -> tuple[bool, str]:
     try:
         import pygments
@@ -70,15 +96,17 @@ def doctor_cmd() -> None:
         ("ozm binary", _check_ozm_on_path),
         ("hook script", _check_hook_script),
         ("claude settings", _check_claude_settings),
+        ("codex project docs", _check_codex_project_docs),
+        ("codex enforcement", _check_codex_enforcement),
         ("pygments", _check_pygments),
         ("project config", _check_project_config),
     ]
     all_ok = True
     for name, check in checks:
         ok, msg = check()
-        icon = "ok" if ok else "WARN"
+        icon = "INFO" if ok is None else "ok" if ok else "WARN"
         click.echo(f"  [{icon:>4}] {name}: {msg}")
-        if not ok:
+        if ok is False:
             all_ok = False
     if all_ok:
         click.echo("\nAll checks passed.")
