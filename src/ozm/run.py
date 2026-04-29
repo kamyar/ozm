@@ -81,7 +81,7 @@ def run_cmd(script: str, args: tuple[str, ...]) -> None:
         audit_log("cached", "run", abs_path)
         click.echo("ozm: allowed (cached)", err=True)
         ensure_executable(script)
-        result = subprocess.run([script, *args])
+        result = subprocess.run([abs_path, *args])
         sys.exit(result.returncode)
 
     label = "NEW" if stored_hash is None else "CHANGED"
@@ -97,7 +97,7 @@ def run_cmd(script: str, args: tuple[str, ...]) -> None:
         else:
             click.echo(f"ozm: approved {script}")
         ensure_executable(script)
-        result = subprocess.run([script, *args])
+        result = subprocess.run([abs_path, *args])
         sys.exit(result.returncode)
 
     if approval.approved is False:

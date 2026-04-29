@@ -74,6 +74,13 @@ def cmd_cmd(command_and_args: tuple[str, ...]) -> None:
         )
         sys.exit(1)
 
+    if args and args[0] == "git":
+        click.echo(
+            "ozm: use 'ozm git <subcommand>' instead of 'ozm cmd git ...'",
+            err=True,
+        )
+        sys.exit(1)
+
     command = " ".join(args)
 
     blocked = is_command_blocked(command)
@@ -87,6 +94,8 @@ def cmd_cmd(command_and_args: tuple[str, ...]) -> None:
         if approval.approved is True:
             audit_log("override", "cmd", command, approval.feedback)
             click.echo("ozm: override granted (one-time)", err=True)
+            result = subprocess.run(command, shell=True)
+            sys.exit(result.returncode)
         else:
             audit_log("denied", "cmd", command, approval.feedback)
             click.echo("ozm: override denied", err=True)

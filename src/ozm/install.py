@@ -32,16 +32,22 @@ def deny(reason):
     sys.exit(0)
 
 SAFE = {"echo", "printf", "pwd", "date", "true", "false", "test"}
+UNSAFE_SHELL = ("$(", "`", "<(", ">", "<")
 
-stripped = re.sub(r"""(?:"(?:[^"\\]|\\.)*"|'[^']*')""", '""', command)
-parts = re.split(r"\s*(?:&&|\|\||;)\s*", stripped)
-for part in parts:
+raw_parts = re.split(r"\s*(?:&&|\|\||;|\|)\s*", command)
+stripped_parts = [
+    re.sub(r"""(?:"(?:[^"\\]|\\.)*"|'[^']*')""", '""', part)
+    for part in raw_parts
+]
+for raw_part, part in zip(raw_parts, stripped_parts):
     part = part.strip()
     if not part:
         continue
     first_word = re.split(r"\s+", part)[0]
     if first_word == "ozm":
         continue
+    if any(token in raw_part for token in UNSAFE_SHELL):
+        deny("Use 'ozm cmd ...' for shell substitution, pipes, or redirection.")
     if first_word in SAFE:
         continue
     if first_word == "git":
@@ -132,6 +138,18 @@ def _write_hook_script() -> None:
 
 
 def _write_file(path: str, content: str) -> None:
+    if os.path.exists(path):
+        with open(path) as f:
+            existing = f.read()
+        if "ozm — script execution gate" in existing:
+            click.echo(f"  exists: {path}")
+            return
+        with open(path, "a") as f:
+            f.write("\n\n")
+            f.write(content)
+        click.echo(f"  appended: {path}")
+        return
+
     with open(path, "w") as f:
         f.write(content)
     click.echo(f"  wrote: {path}")
