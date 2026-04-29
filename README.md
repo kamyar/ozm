@@ -1,5 +1,7 @@
 # ozm
 
+ozm - Oberzugriffsmeister (“chief access master”) helps you allow more LLM agent commands without giving too much access.
+
 Let AI agents run free — without giving up control.
 
 AI coding agents are powerful, but they need to execute commands: installing packages, running tests, writing and executing scripts. Most setups force a choice — either babysit every command, or trust the agent blindly.
