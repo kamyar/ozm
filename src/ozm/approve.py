@@ -333,7 +333,7 @@ cmdTc's setWidthTracksTextView:true
 cmdScroll's setDocumentView:cmdField
 accessory's addSubview:cmdScroll
 
-set patLabel to current application's NSTextField's labelWithString:"Allow pattern (saved to .ozm.yaml):"
+set patLabel to current application's NSTextField's labelWithString:"Allow pattern (saved to trusted project config):"
 patLabel's setFrame:(current application's NSMakeRect(0, 67, 560, 16))
 patLabel's setFont:(current application's NSFont's systemFontOfSize:11)
 patLabel's setTextColor:(current application's NSColor's secondaryLabelColor())

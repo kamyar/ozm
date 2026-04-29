@@ -77,6 +77,12 @@ ozm works with any AI coding agent that executes shell commands:
 
 For Claude Code, enforcement is automatic via the hook. For other agents, compliance depends on the agent following the instructions in the project's markdown files.
 
+### Why Codex may not use ozm
+
+Codex does not currently have a shell pre-tool hook that `ozm install` can register. `ozm install --project` writes `AGENTS.md`, and Codex only sees those instructions when the session is started in that project or after the instructions are explicitly provided. If you install ozm after a Codex session is already running, or if Codex is working from a different directory, it will not automatically re-read the new file.
+
+Use `ozm doctor` inside the project to check both sides: Claude hook status and whether the current project has Codex-readable `AGENTS.md` instructions.
+
 ## Commands
 
 ```
