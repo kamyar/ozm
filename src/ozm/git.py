@@ -42,6 +42,9 @@ def validate_message(message: str) -> list[str]:
     lines = message.splitlines()
     subject = lines[0] if lines else ""
 
+    if len(lines) > 1:
+        errors.append("Multi-line commit messages are not allowed — use a single-line -m \"message\"")
+
     if len(subject) > MAX_SUBJECT_LENGTH:
         errors.append(
             f"Subject line is {len(subject)} chars (max {MAX_SUBJECT_LENGTH})"
