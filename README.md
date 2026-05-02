@@ -18,28 +18,22 @@ AI coding agents are powerful, but they need to execute commands: installing pac
 No more clicking through identical permission prompts. No more worrying about what the agent just ran.
 
 ```mermaid
-flowchart TD
-    Agent -->|shell command| Hook[PreToolUse Hook]
-    Hook -->|"safe (echo, pwd)"| Pass[Run directly]
-    Hook -->|git| OzmGit[ozm git]
-    Hook -->|script file| OzmRun[ozm run]
-    Hook -->|other| OzmCmd[ozm cmd]
+flowchart LR
+    Agent([AI Agent]):::blue ==>|command| Ozm{ozm}:::purple
+    Ozm ==>|allowlisted\nor cached| Run([Execute]):::green
+    Ozm ==>|unknown| Dialog([Approval Dialog]):::yellow
+    Ozm ==>|blocked| Deny([Denied]):::red
+    Dialog ==>|allow| Run
+    Dialog ==>|deny| Deny
+    Deny -..->|feedback| Agent
 
-    OzmRun --> HashCheck{Hash cached?}
-    HashCheck -->|yes| Run[Execute + log]
-    HashCheck -->|no| FileDialog[Dialog: file content / diff]
-    FileDialog -->|allow| StoreRun[Store hash + execute]
-    FileDialog -->|deny + feedback| Agent
+    classDef blue fill:#dbeafe,stroke:#3b82f6,color:#1e3a5f,stroke-width:2px
+    classDef purple fill:#ede9fe,stroke:#8b5cf6,color:#3b1f7e,stroke-width:2px
+    classDef green fill:#d1fae5,stroke:#10b981,color:#064e3b,stroke-width:2px
+    classDef red fill:#fee2e2,stroke:#ef4444,color:#7f1d1d,stroke-width:2px
+    classDef yellow fill:#fef9c3,stroke:#eab308,color:#713f12,stroke-width:2px
 
-    OzmCmd --> Blocked{Blocked?}
-    Blocked -->|yes| Deny[Deny + log]
-    Blocked -->|no| Allowed{Allowlisted?}
-    Allowed -->|yes| Run
-    Allowed -->|no| CmdCache{Hash cached?}
-    CmdCache -->|yes| Run
-    CmdCache -->|no| CmdDialog[Dialog: editable command]
-    CmdDialog -->|allow| StoreCmd[Store hash + execute]
-    CmdDialog -->|deny + feedback| Agent
+    linkStyle default stroke-width:2px
 ```
 
 ## Install
