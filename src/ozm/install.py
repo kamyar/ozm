@@ -33,11 +33,13 @@ def deny(reason):
 
 SAFE = {"echo", "printf", "pwd", "date", "true", "false", "test"}
 UNSAFE_PATTERNS = re.compile(r"\$\(|`|<\(|>\(|\$\{")
+REDIRECT_PATTERN = re.compile(r"(?:>>?|<)\s*\S")
 
 if UNSAFE_PATTERNS.search(command):
     deny("Command contains shell expansion ($(), ``, <(), ${}) — use 'ozm cmd ...' instead.")
 
 raw_parts = re.split(r"\s*(?:&&|\|\||;|\||\n)\s*", command)
+is_compound = len(raw_parts) > 1
 stripped_parts = [
     re.sub(r"""(?:"(?:[^"\\]|\\.)*"|'[^']*')""", '""', part)
     for part in raw_parts
@@ -50,10 +52,12 @@ for raw_part, part in zip(raw_parts, stripped_parts):
     if first_word == "ozm":
         continue
     if first_word in SAFE:
+        if is_compound or REDIRECT_PATTERN.search(part):
+            deny(f"Use 'ozm cmd {raw_part.strip()}' instead of running commands directly.")
         continue
     if first_word == "git":
         deny("Use 'ozm git <subcommand>' instead of 'git' directly.")
-    deny(f"Use 'ozm cmd {part}' instead of running commands directly. For script files use 'ozm run <script>'.")
+    deny(f"Use 'ozm cmd {raw_part.strip()}' instead of running commands directly. For script files use 'ozm run <script>'.")
 '''
 
 CLAUDE_MD = """# ozm — script execution gate
