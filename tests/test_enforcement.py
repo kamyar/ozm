@@ -85,7 +85,7 @@ class InstallHookTests(unittest.TestCase):
         result = self.run_hook("echo ok | git status")
 
         self.assertEqual(result.returncode, 0)
-        self.assertIn("Use 'ozm git <subcommand>'", result.stdout)
+        self.assertIn("deny", result.stdout)
 
 
 class RunTests(unittest.TestCase):

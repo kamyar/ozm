@@ -322,6 +322,22 @@ class TestHookParserRegression(unittest.TestCase):
         result = self._run_hook("echo hello world")
         self.assertEqual(result.stdout.strip(), "")
 
+    def test_safe_word_in_compound_blocked(self):
+        result = self._run_hook("ozm status; echo PWNED")
+        self.assertIn("deny", result.stdout)
+
+    def test_safe_word_with_redirect_blocked(self):
+        result = self._run_hook("echo secret > /tmp/leak")
+        self.assertIn("deny", result.stdout)
+
+    def test_printf_with_redirect_blocked(self):
+        result = self._run_hook("printf '%s' data > /tmp/leak")
+        self.assertIn("deny", result.stdout)
+
+    def test_compound_safe_after_semicolon_blocked(self):
+        result = self._run_hook("ozm cmd echo safe; echo PWNED")
+        self.assertIn("deny", result.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()
