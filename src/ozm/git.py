@@ -14,6 +14,7 @@ from ozm.config import commit_config
 MAX_SUBJECT_LENGTH = 72
 MAX_MESSAGE_LENGTH = 500
 PROTECTED_BRANCHES = {"main", "master"}
+DANGEROUS_SUBCOMMANDS = {"filter-branch", "filter-repo"}
 ATTRIBUTION_PATTERN = re.compile(r"^Co-Authored-By:", re.IGNORECASE | re.MULTILINE)
 
 
@@ -90,7 +91,7 @@ def _check_commit(args: list[str]) -> str | None:
 
 def _check_push(args: list[str]) -> str | None:
     """Return a violation string if blocked, None if ok."""
-    force_flags = {"-f"}
+    force_flags = {"-f", "--mirror"}
     if any(a in force_flags or a.startswith("--force") for a in args):
         return "force push is not allowed"
 
@@ -178,6 +179,16 @@ def git_cmd(args: tuple[str, ...]) -> None:
     subcmd = args[0]
     rest = list(args[1:])
     rest, reason = _extract_reason(rest)
+
+    if subcmd in DANGEROUS_SUBCOMMANDS:
+        full_cmd = f"git {subcmd} {' '.join(rest)}"
+        _handle_violation(f"'git {subcmd}' is not allowed", full_cmd, reason)
+
+    if subcmd == "config":
+        for arg in rest:
+            if arg.startswith("alias.") or arg.startswith("core.hooksPath"):
+                full_cmd = f"git {subcmd} {' '.join(rest)}"
+                _handle_violation(f"'git config {arg}' is not allowed", full_cmd, reason)
 
     if subcmd == "commit":
         violation = _check_commit(rest)

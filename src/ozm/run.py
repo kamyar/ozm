@@ -129,7 +129,7 @@ def status_cmd() -> None:
     from ozm.config import find_project_root
 
     root = find_project_root()
-    prefix = root + ":"
+    prefix = root + "\0"
     hashes = load_hashes()
     entries = {k: v for k, v in hashes.items() if k.startswith(prefix)}
     if not entries:
@@ -155,7 +155,7 @@ def reset_cmd(script: str | None, reset_all: bool) -> None:
     from ozm.config import find_project_root
 
     root = find_project_root()
-    prefix = root + ":"
+    prefix = root + "\0"
 
     if reset_all:
         hashes = load_hashes()
