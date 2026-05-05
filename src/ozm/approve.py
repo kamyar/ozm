@@ -5,7 +5,16 @@ import os
 import platform
 import subprocess
 import tempfile
+import unicodedata
 from typing import NamedTuple
+
+
+def _secure_tmpfile(suffix: str, content: str) -> str:
+    path = tempfile.mktemp(suffix=suffix)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "w") as f:
+        f.write(content)
+    return path
 
 
 class ApprovalResult(NamedTuple):
@@ -19,8 +28,9 @@ def _get_git_diff(path: str) -> str | None:
     abs_path = os.path.abspath(path)
     try:
         result = subprocess.run(
-            ["git", "diff", "--no-color", abs_path],
+            ["git", "diff", "--no-color", "--no-ext-diff", abs_path],
             capture_output=True, text=True, timeout=5,
+            env={**os.environ, "GIT_CONFIG_NOSYSTEM": "1"},
         )
         if result.returncode == 0 and result.stdout.strip():
             return result.stdout
@@ -56,7 +66,12 @@ def _count_lines(path: str) -> int:
         return sum(1 for _ in f)
 
 
+def _strip_unicode_control(s: str) -> str:
+    return "".join(c for c in s if unicodedata.category(c) not in ("Cf", "Cc", "Mn") or c in ("\n", "\t"))
+
+
 def _escape(s: str) -> str:
+    s = _strip_unicode_control(s)
     return s.replace("\\", "\\\\").replace('"', '\\"')
 
 
@@ -248,33 +263,18 @@ def _approve_file_macos(script: str, label: str, *, diff: str | None = None) -> 
         subtitle = f"{abs_path} — diff ({line_count} lines total)"
         diff_rtf = _render_diff_rtf(diff)
         if diff_rtf:
-            diff_file = tempfile.NamedTemporaryFile(
-                mode="w", suffix=".rtf", delete=False
-            )
-            diff_file.write(diff_rtf)
-            diff_file.close()
-            diff_tmp = diff_file.name
+            diff_tmp = _secure_tmpfile(".rtf", diff_rtf)
             load_section = _LOAD_RTF.replace("__RTFPATH__", _escape(diff_tmp))
             set_section = _SET_RTF
         else:
-            diff_plain = tempfile.NamedTemporaryFile(
-                mode="w", suffix=".diff", delete=False
-            )
-            diff_plain.write(diff)
-            diff_plain.close()
-            diff_tmp = diff_plain.name
+            diff_tmp = _secure_tmpfile(".diff", diff)
             load_section = _LOAD_PLAIN.replace("__FILEPATH__", _escape(diff_tmp))
             set_section = _SET_PLAIN
     else:
         subtitle = f"{abs_path} — {line_count} lines"
         rtf_content = _render_rtf(abs_path)
         if rtf_content:
-            rtf_file = tempfile.NamedTemporaryFile(
-                mode="w", suffix=".rtf", delete=False
-            )
-            rtf_file.write(rtf_content)
-            rtf_file.close()
-            rtf_tmp = rtf_file.name
+            rtf_tmp = _secure_tmpfile(".rtf", rtf_content)
             load_section = _LOAD_RTF.replace("__RTFPATH__", _escape(rtf_tmp))
             set_section = _SET_RTF
         else:
@@ -290,11 +290,7 @@ def _approve_file_macos(script: str, label: str, *, diff: str | None = None) -> 
     )
 
     try:
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".applescript", delete=False
-        ) as f:
-            f.write(applescript)
-            script_tmp = f.name
+        script_tmp = _secure_tmpfile(".applescript", applescript)
         try:
             result = subprocess.run(
                 ["osascript", script_tmp],
@@ -410,11 +406,7 @@ def _approve_cmd_macos(command: str) -> ApprovalResult:
     applescript = _COCOA_CMD_DIALOG.replace("__COMMAND__", _escape(command))
 
     try:
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".applescript", delete=False
-        ) as f:
-            f.write(applescript)
-            tmp = f.name
+        tmp = _secure_tmpfile(".applescript", applescript)
         try:
             result = subprocess.run(
                 ["osascript", tmp],
@@ -488,11 +480,7 @@ def _override_macos(command: str, violation: str, reason: str) -> ApprovalResult
     )
 
     try:
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".applescript", delete=False
-        ) as f:
-            f.write(applescript)
-            tmp = f.name
+        tmp = _secure_tmpfile(".applescript", applescript)
         try:
             result = subprocess.run(
                 ["osascript", tmp],

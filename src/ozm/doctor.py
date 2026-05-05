@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """Diagnostics for ozm installation health."""
 
+import hashlib
 import json
 import os
 import shutil
 
 import click
 
-from ozm.install import ENFORCE_HOOK
+from ozm.install import ENFORCE_HOOK, HOOK_SCRIPT
 
 CLAUDE_SETTINGS = os.path.expanduser("~/.claude/settings.json")
 OZM_MARKER = "ozm — script execution gate"
@@ -21,11 +22,17 @@ def _check_ozm_on_path() -> tuple[bool, str]:
 
 
 def _check_hook_script() -> tuple[bool, str]:
-    if os.path.isfile(ENFORCE_HOOK) and os.access(ENFORCE_HOOK, os.X_OK):
-        return True, f"hook script at {ENFORCE_HOOK}"
-    if os.path.isfile(ENFORCE_HOOK):
+    if not os.path.isfile(ENFORCE_HOOK):
+        return False, f"hook script missing: {ENFORCE_HOOK} — run 'ozm install'"
+    if not os.access(ENFORCE_HOOK, os.X_OK):
         return False, f"hook exists but not executable: {ENFORCE_HOOK}"
-    return False, f"hook script missing: {ENFORCE_HOOK} — run 'ozm install'"
+    with open(ENFORCE_HOOK) as f:
+        content = f.read()
+    expected_hash = hashlib.sha256(HOOK_SCRIPT.encode()).hexdigest()
+    actual_hash = hashlib.sha256(content.encode()).hexdigest()
+    if actual_hash != expected_hash:
+        return False, f"hook content modified — run 'ozm install' to restore"
+    return True, f"hook script at {ENFORCE_HOOK}"
 
 
 def _check_claude_settings() -> tuple[bool, str]:

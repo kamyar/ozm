@@ -121,6 +121,12 @@ def cmd_cmd(command_and_args: tuple[str, ...]) -> None:
 
     if approval.approved is True:
         run_command = approval.command or command
+        if run_command != command:
+            recheck = is_command_blocked(run_command)
+            if recheck:
+                audit_log("blocked", "cmd", run_command)
+                click.echo(f"ozm: edited command blocked by pattern '{recheck}'", err=True)
+                sys.exit(1)
         if approval.allow_pattern:
             add_allowed_command(approval.allow_pattern)
             click.echo(f"ozm: added allowlist pattern: {approval.allow_pattern}", err=True)

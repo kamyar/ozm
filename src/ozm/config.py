@@ -9,11 +9,21 @@ snapshot it into ~/.ozm/projects/.
 import fnmatch
 import hashlib
 import os
+import re
+import unicodedata
 
 import yaml
 
+SHELL_METACHARS = re.compile(r"[;|&$`\n()<>{}\[\]]")
+
+
+def sanitize_command(command: str) -> str:
+    return "".join(c for c in command if unicodedata.category(c) not in ("Cf", "Cc", "Mn") or c in ("\n", "\t"))
+
 
 OZM_DIR = os.path.expanduser("~/.ozm")
+if os.path.islink(OZM_DIR):
+    raise RuntimeError(f"~/.ozm is a symlink — refusing to load config (possible tampering)")
 PROJECTS_DIR = os.path.join(OZM_DIR, "projects")
 
 
@@ -60,6 +70,7 @@ def _save_user_config(config: dict) -> None:
 
 def is_command_blocked(command: str) -> str | None:
     """Check if a command matches any pattern in blocked_commands."""
+    command = sanitize_command(command)
     config = load_project_config()
     patterns = config.get("blocked_commands", [])
     if not isinstance(patterns, list):
@@ -75,6 +86,9 @@ def is_command_blocked(command: str) -> str | None:
 
 def is_command_allowed(command: str) -> bool:
     """Check if a command matches any pattern in the project's allowed_commands."""
+    command = sanitize_command(command)
+    if SHELL_METACHARS.search(command):
+        return False
     config = load_project_config()
     patterns = config.get("allowed_commands", [])
     if not isinstance(patterns, list):
@@ -110,4 +124,4 @@ def commit_config() -> dict:
 def project_key(key: str) -> str:
     """Prefix a hash key with the project root for project-scoped storage."""
     root = find_project_root()
-    return f"{root}:{key}"
+    return f"{root}\0{key}"
