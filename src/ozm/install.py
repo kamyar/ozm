@@ -32,9 +32,12 @@ def deny(reason):
     sys.exit(0)
 
 SAFE = {"echo", "printf", "pwd", "date", "true", "false", "test"}
-UNSAFE_SHELL = ("$(", "`", "<(", ">", "<")
+UNSAFE_PATTERNS = re.compile(r"\$\(|`|<\(|>\(|\$\{")
 
-raw_parts = re.split(r"\s*(?:&&|\|\||;|\|)\s*", command)
+if UNSAFE_PATTERNS.search(command):
+    deny("Command contains shell expansion ($(), ``, <(), ${}) — use 'ozm cmd ...' instead.")
+
+raw_parts = re.split(r"\s*(?:&&|\|\||;|\||\n)\s*", command)
 stripped_parts = [
     re.sub(r"""(?:"(?:[^"\\]|\\.)*"|'[^']*')""", '""', part)
     for part in raw_parts
@@ -46,8 +49,6 @@ for raw_part, part in zip(raw_parts, stripped_parts):
     first_word = re.split(r"\s+", part)[0]
     if first_word == "ozm":
         continue
-    if any(token in raw_part for token in UNSAFE_SHELL):
-        deny("Use 'ozm cmd ...' for shell substitution, pipes, or redirection.")
     if first_word in SAFE:
         continue
     if first_word == "git":
