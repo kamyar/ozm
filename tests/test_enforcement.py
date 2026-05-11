@@ -21,6 +21,40 @@ class CmdTests(unittest.TestCase):
         self.assertNotEqual(result.exit_code, 0)
         self.assertIn("use 'ozm git <subcommand>'", result.output)
 
+    def test_cmd_rejects_sed_with_alternatives(self):
+        with patch.object(cmd_mod, "request_cmd_approval") as request_cmd_approval, \
+            patch.object(cmd_mod, "audit_log"):
+            result = CliRunner().invoke(
+                cmd_mod.cmd_cmd,
+                ["sed", "-n", "1p", "README.md"],
+            )
+
+        self.assertNotEqual(result.exit_code, 0)
+        self.assertIn("blocked command 'sed'", result.output)
+        self.assertIn("rg for searching", result.output)
+        self.assertIn("cat/nl/head/tail for viewing", result.output)
+        request_cmd_approval.assert_not_called()
+
+    def test_cmd_rejects_path_sed(self):
+        with patch.object(cmd_mod, "audit_log"):
+            result = CliRunner().invoke(
+                cmd_mod.cmd_cmd,
+                ["/usr/bin/sed", "-n", "1p", "README.md"],
+            )
+
+        self.assertNotEqual(result.exit_code, 0)
+        self.assertIn("blocked command 'sed'", result.output)
+
+    def test_cmd_rejects_env_prefixed_sed(self):
+        with patch.object(cmd_mod, "audit_log"):
+            result = CliRunner().invoke(
+                cmd_mod.cmd_cmd,
+                ["env", "LC_ALL=C", "sed", "-n", "1p", "README.md"],
+            )
+
+        self.assertNotEqual(result.exit_code, 0)
+        self.assertIn("blocked command 'sed'", result.output)
+
     def test_blocked_override_executes_once_without_second_approval(self):
         completed = subprocess.CompletedProcess(args="rm -rf build", returncode=0)
 
@@ -118,6 +152,14 @@ class InstallHookTests(unittest.TestCase):
         self.assertIn("codex_hooks = true", config_text)
         self.assertIn(hook, config_text)
         self.assertIn('decision = "forbidden"', rules_text)
+
+    def test_hook_blocks_sed_with_alternatives(self):
+        result = self.run_hook("sed -n '1p' README.md")
+
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("deny", result.stdout)
+        self.assertIn("sed is disallowed", result.stdout)
+        self.assertIn("rg for searching", result.stdout)
 
 
 class RunTests(unittest.TestCase):

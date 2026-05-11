@@ -118,7 +118,7 @@ commit:
 
 Then run `ozm trust` to activate it. This copies `.ozm.yaml` into `~/.ozm/projects/` where ozm actually reads it. The in-repo file is never read at runtime — agents can edit it all they want, but changes have no effect until a human explicitly trusts it.
 
-> **Security note:** Avoid patterns like `"uv run *"` or `"python *"` in `allowed_commands` — these bypass content review for script files. Use `ozm run` for scripts instead, which gates on file content hash.
+> **Security note:** Avoid patterns like `"uv run *"` or `"python *"` in `allowed_commands` — these bypass content review for script files. Use `ozm run` for scripts instead, which gates on file content hash. `sed` and `gsed` are never allowlisted because they can edit files in-place; use `rg` for searching, `cat`/`nl`/`head`/`tail` for viewing, or `ozm run <script>` for transformations.
 
 See [docs/configuration.md](docs/configuration.md) for all options.
 

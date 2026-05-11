@@ -6,6 +6,7 @@ All script execution and git operations must go through `ozm`.
 
 - **Run scripts:** `ozm run <script> [args...]` — never `python`, `bash`, `./`, or `uv run` directly
 - **Run commands:** `ozm cmd <command> [args...]` — for arbitrary commands (e.g. `ozm cmd uv pip install -e .`)
+- **Avoid sed:** `sed`/`gsed` are blocked because they can edit files in-place. Use `rg` for searching, `cat`/`nl`/`head`/`tail` for viewing, or `ozm run <script>` for transformations.
 - **Commit:** `ozm git commit -m "short message"` — max 72 char subject, max 500 chars total
 - **Push:** `ozm git push` — no force push, no pushing to main/master
 - **Status:** `ozm status` — show tracked scripts

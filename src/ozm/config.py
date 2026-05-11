@@ -10,15 +10,70 @@ import fnmatch
 import hashlib
 import os
 import re
+import shlex
 import unicodedata
 
 import yaml
 
 SHELL_METACHARS = re.compile(r"[;|&$`\n()<>{}\[\]]")
 
+SED_ALTERNATIVES = (
+    "sed is disallowed because it can edit files in-place and cannot be safely "
+    "blanket-approved. Use rg for searching, cat/nl/head/tail for viewing, or "
+    "write a small reviewed script and run it with 'ozm run <script>' for "
+    "transformations."
+)
+DISALLOWED_COMMANDS = {
+    "sed": SED_ALTERNATIVES,
+    "gsed": SED_ALTERNATIVES,
+}
+
 
 def sanitize_command(command: str) -> str:
     return "".join(c for c in command if unicodedata.category(c) not in ("Cf", "Cc", "Mn") or c in ("\n", "\t"))
+
+
+def _is_env_assignment(token: str) -> bool:
+    name, sep, _value = token.partition("=")
+    return bool(sep and name and re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", name))
+
+
+def command_name(command: str) -> str:
+    command = sanitize_command(command)
+    try:
+        parts = shlex.split(command)
+    except ValueError:
+        parts = command.split()
+    if not parts:
+        return ""
+
+    index = 0
+    while index < len(parts) and _is_env_assignment(parts[index]):
+        index += 1
+    if index < len(parts) and os.path.basename(parts[index]) == "env":
+        index += 1
+        while index < len(parts):
+            token = parts[index]
+            if token == "--":
+                index += 1
+                break
+            if _is_env_assignment(token) or token in {"-i", "--ignore-environment"}:
+                index += 1
+                continue
+            if token in {"-u", "--unset"} and index + 1 < len(parts):
+                index += 2
+                continue
+            if token.startswith("-u") or token.startswith("--unset="):
+                index += 1
+                continue
+            break
+    if index >= len(parts):
+        return ""
+    return os.path.basename(parts[index])
+
+
+def disallowed_command_reason(command: str) -> str | None:
+    return DISALLOWED_COMMANDS.get(command_name(command))
 
 
 OZM_DIR = os.path.expanduser("~/.ozm")
@@ -87,6 +142,8 @@ def is_command_blocked(command: str) -> str | None:
 def is_command_allowed(command: str) -> bool:
     """Check if a command matches any pattern in the project's allowed_commands."""
     command = sanitize_command(command)
+    if disallowed_command_reason(command):
+        return False
     if SHELL_METACHARS.search(command):
         return False
     config = load_project_config()
@@ -102,8 +159,10 @@ def is_command_allowed(command: str) -> bool:
     return False
 
 
-def add_allowed_command(pattern: str) -> None:
+def add_allowed_command(pattern: str) -> bool:
     """Append a pattern to allowed_commands in the user-owned config."""
+    if disallowed_command_reason(pattern):
+        return False
     config = load_project_config()
     commands = config.get("allowed_commands", [])
     if not isinstance(commands, list):
@@ -112,6 +171,7 @@ def add_allowed_command(pattern: str) -> None:
         commands.append(pattern)
         config["allowed_commands"] = commands
         _save_user_config(config)
+    return True
 
 
 def commit_config() -> dict:

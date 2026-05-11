@@ -86,6 +86,8 @@ ozm: use 'ozm run myscript.py' instead — make sure the script has a shebang (#
 
 **Editable commands:** The macOS approval dialog lets you edit the command before running it. You can also enter an allowlist pattern (e.g. `curl https://api.example.com/*`) that gets saved to `.ozm.yaml` for future use.
 
+**Disallowed commands:** `sed` and `gsed` are blocked even when they appear in `allowed_commands`, because they can edit files in-place and are not safe to blanket approve. Use `rg` for searching, `cat`/`nl`/`head`/`tail` for viewing, or write a small reviewed script and run it with `ozm run <script>` for transformations.
+
 **Approval order:**
 
 1. Blocked by `.ozm.yaml` `blocked_commands`? Deny immediately.

@@ -56,6 +56,45 @@ class TestH1MetacharRejection(unittest.TestCase):
         self.assertFalse(self._allow("echo foo > /etc/passwd"))
 
 
+class TestSedAllowlistRejection(unittest.TestCase):
+    """sed must never be allowlisted because it can edit files in-place."""
+
+    def _allow(self, command):
+        with patch.object(config_mod, "load_project_config", return_value={
+            "allowed_commands": ["*", "sed *", "gsed *", "/usr/bin/sed *"],
+        }):
+            return config_mod.is_command_allowed(command)
+
+    def test_sed_rejected_even_with_matching_allowlist(self):
+        self.assertFalse(self._allow("sed -n 1p README.md"))
+
+    def test_gsed_rejected_even_with_matching_allowlist(self):
+        self.assertFalse(self._allow("gsed -n 1p README.md"))
+
+    def test_path_sed_rejected_even_with_matching_allowlist(self):
+        self.assertFalse(self._allow("/usr/bin/sed -n 1p README.md"))
+
+    def test_env_prefixed_sed_rejected_even_with_matching_allowlist(self):
+        self.assertFalse(self._allow("env LC_ALL=C sed -n 1p README.md"))
+
+    def test_assignment_prefixed_sed_rejected_even_with_matching_allowlist(self):
+        self.assertFalse(self._allow("LC_ALL=C sed -n 1p README.md"))
+
+    def test_env_option_prefixed_sed_name_detected(self):
+        name = config_mod.command_name("env -i LC_ALL=C /usr/bin/sed -n 1p README.md")
+
+        self.assertEqual(name, "sed")
+
+    def test_sed_pattern_not_saved_from_dialog(self):
+        with patch.object(config_mod, "load_project_config", return_value={
+            "allowed_commands": [],
+        }), patch.object(config_mod, "_save_user_config") as save:
+            saved = config_mod.add_allowed_command("sed *")
+
+        self.assertFalse(saved)
+        save.assert_not_called()
+
+
 # ---------------------------------------------------------------------------
 # H2: Edited commands re-checked against blocklist
 # ---------------------------------------------------------------------------
@@ -74,6 +113,22 @@ class TestH2EditedCommandRecheck(unittest.TestCase):
 
         self.assertNotEqual(result.exit_code, 0)
         self.assertIn("blocked", result.output)
+
+    def test_edited_to_sed_command_is_rejected(self):
+        with patch.object(cmd_mod, "is_command_blocked", return_value=None), \
+             patch.object(cmd_mod, "is_command_allowed", return_value=False), \
+             patch.object(cmd_mod, "load_hashes", return_value={}), \
+             patch.object(cmd_mod, "save_hashes") as save_hashes, \
+             patch.object(cmd_mod, "request_cmd_approval", return_value=ApprovalResult(
+                 approved=True, command="sed -i '' s/a/b/ README.md")), \
+             patch.object(cmd_mod, "subprocess") as mock_sub, \
+             patch.object(cmd_mod, "audit_log"):
+            result = CliRunner().invoke(cmd_mod.cmd_cmd, ["echo", "hello"])
+
+        self.assertNotEqual(result.exit_code, 0)
+        self.assertIn("blocked command 'sed'", result.output)
+        save_hashes.assert_not_called()
+        mock_sub.run.assert_not_called()
 
     def test_edited_to_same_command_is_not_rechecked(self):
         completed = subprocess.CompletedProcess(args="echo hello", returncode=0)
