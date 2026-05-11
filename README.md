@@ -8,11 +8,11 @@ AI coding agents are powerful, but they need to execute commands: installing pac
 
 `ozm` gives you a third option. It sits between the agent and your shell, gating every command through a content-aware approval system. Approve once, run forever — until something changes.
 
-- **Per-project allowlists** let you pre-approve safe commands so the agent flows uninterrupted
+- **Global and per-project allowlists** let you pre-approve safe commands so the agent flows uninterrupted
 - **Blocklists** prevent dangerous commands from ever running
 - **Native macOS dialogs** with syntax-highlighted code review, dark mode support, and inline feedback
 - **Diff view** for changed scripts — see exactly what changed before re-approving
-- **Editable commands** — modify a command or set an allowlist pattern right in the approval dialog
+- **Editable commands** — modify a command or set a project/global allow or block rule right in the approval dialog
 - **Audit log** — every approval, denial, and block is recorded with action source (clicked, cached, config, denied, blocked, no-dialog)
 
 No more clicking through identical permission prompts. No more worrying about what the agent just ran.
@@ -59,7 +59,7 @@ ozm install --project   # hooks into Claude Code + Codex, writes CLAUDE.md + AGE
 
 That's it. The agent now routes all Bash commands through `ozm`.
 
-**Optional:** Create `.ozm.yaml` in your project with pre-approved commands and blocklists, then run `ozm trust` to activate it. See [docs/configuration.md](docs/configuration.md).
+**Optional:** Create `.ozm.yaml` in your project with pre-approved commands and blocklists, then run `ozm trust` to activate it. Global command rules live in `~/.ozm/config.yaml`. See [docs/configuration.md](docs/configuration.md).
 
 ## Agent compatibility
 
@@ -97,7 +97,7 @@ Commands:
 
 See [docs/commands.md](docs/commands.md) for detailed usage and examples.
 
-## Per-project configuration
+## Configuration
 
 Configuration is optional. Without it, every command goes through the approval dialog or hash cache. To pre-approve safe commands, create `.ozm.yaml` in your project root:
 
@@ -118,6 +118,8 @@ commit:
 
 Then run `ozm trust` to activate it. This copies `.ozm.yaml` into `~/.ozm/projects/` where ozm actually reads it. The in-repo file is never read at runtime — agents can edit it all they want, but changes have no effect until a human explicitly trusts it.
 
+For commands you want available in every project, add `allowed_commands` or `blocked_commands` to `~/.ozm/config.yaml`, or check **Apply globally** when saving a rule from the command approval dialog. If the rule field is blank, ozm saves the exact command globally. Global and project blocklists are always evaluated before any allowlist.
+
 > **Security note:** Avoid patterns like `"uv run *"` or `"python *"` in `allowed_commands` — these bypass content review for script files. Use `ozm run` for scripts instead, which gates on file content hash. `sed` and `gsed` are never allowlisted because they can edit files in-place; use `rg` for searching, `cat`/`nl`/`head`/`tail` for viewing, or `ozm run <script>` for transformations.
 
 See [docs/configuration.md](docs/configuration.md) for all options.
@@ -128,7 +130,7 @@ See [docs/configuration.md](docs/configuration.md) for all options.
 2. For Codex, `ozm install` also writes additive execpolicy rules under `~/.codex/rules/`
 3. The hook blocks direct execution and forces everything through `ozm run`, `ozm cmd`, or `ozm git`
 4. Each `ozm run`, `ozm cmd`, and `ozm git` call must include `--agent-name "<what you are working on>"` and `--agent-description "<one-line intent>"`; missing or multiline metadata is rejected before execution
-5. Each command/script goes through: blocklist -> allowlist -> project-scoped hash cache -> approval dialog
+5. Each command/script goes through: global/project blocklists -> global/project allowlists -> project-scoped hash cache -> approval dialog
 6. Approved content hashes are stored per-project in `~/.ozm/hashes.yaml`
 7. Every decision is logged to `~/.ozm/audit.log`
 

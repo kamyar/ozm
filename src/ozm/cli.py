@@ -61,11 +61,13 @@ def trust_cmd() -> None:
 @click.command("config")
 def config_cmd() -> None:
     """Show the path to this project's user-owned config."""
-    from ozm.config import _project_config_path, find_project_root
+    from ozm.config import _global_config_path, _project_config_path, find_project_root
     root = find_project_root()
     path = _project_config_path()
+    global_path = _global_config_path()
     click.echo(f"project: {root}")
     click.echo(f"config:  {path}")
+    click.echo(f"global:  {global_path}")
     if os.path.isfile(path):
         click.echo(f"status:  exists")
     else:

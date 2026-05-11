@@ -13,6 +13,7 @@ from ozm.approve import request_cmd_approval, request_override
 from ozm.audit import log as audit_log
 from ozm.config import (
     add_allowed_command,
+    add_blocked_command,
     command_name,
     disallowed_command_reason,
     is_command_allowed,
@@ -26,6 +27,10 @@ CMD_PREFIX = "cmd:"
 
 def _cmd_hash(command: str) -> str:
     return hashlib.sha256(command.encode()).hexdigest()
+
+
+def _scope_label(global_scope: bool) -> str:
+    return "global" if global_scope else "project"
 
 
 WRAPPERS = {"uv", "npx", "bunx", "poetry", "pipx", "run", "exec"}
@@ -109,7 +114,7 @@ def cmd_cmd(command_and_args: tuple[str, ...]) -> None:
     if blocked:
         if not reason:
             audit_log("blocked", "cmd", command)
-            click.echo(f"ozm: blocked by pattern '{blocked}' in .ozm.yaml", err=True)
+            click.echo(f"ozm: blocked by pattern '{blocked}' in config", err=True)
             click.echo("ozm: use --reason \"justification\" to request a one-time override", err=True)
             sys.exit(1)
         approval = request_override(command, f"blocked by pattern '{blocked}'", reason, agent)
@@ -155,13 +160,20 @@ def cmd_cmd(command_and_args: tuple[str, ...]) -> None:
                 audit_log("blocked", "cmd", run_command)
                 click.echo(f"ozm: edited command blocked by pattern '{recheck}'", err=True)
                 sys.exit(1)
-        if approval.allow_pattern:
-            if add_allowed_command(approval.allow_pattern):
-                click.echo(f"ozm: added allowlist pattern: {approval.allow_pattern}", err=True)
-            else:
-                reason = disallowed_command_reason(approval.allow_pattern)
+        allow_pattern = approval.allow_pattern
+        if approval.apply_globally and not allow_pattern:
+            allow_pattern = run_command
+        if allow_pattern:
+            scope = _scope_label(approval.apply_globally)
+            if add_allowed_command(allow_pattern, global_scope=approval.apply_globally):
                 click.echo(
-                    f"ozm: not adding allowlist pattern '{approval.allow_pattern}': {reason}",
+                    f"ozm: added {scope} allowlist pattern: {allow_pattern}",
+                    err=True,
+                )
+            else:
+                reason = disallowed_command_reason(allow_pattern)
+                click.echo(
+                    f"ozm: not adding allowlist pattern '{allow_pattern}': {reason}",
                     err=True,
                 )
         run_key = project_key(CMD_PREFIX + run_command)
@@ -179,6 +191,16 @@ def cmd_cmd(command_and_args: tuple[str, ...]) -> None:
         sys.exit(result.returncode)
 
     if approval.approved is False:
+        block_pattern = approval.block_pattern
+        if approval.apply_globally and not block_pattern:
+            block_pattern = approval.command or command
+        if block_pattern:
+            scope = _scope_label(approval.apply_globally)
+            if add_blocked_command(block_pattern, global_scope=approval.apply_globally):
+                click.echo(
+                    f"ozm: added {scope} blocklist pattern: {block_pattern}",
+                    err=True,
+                )
         audit_log("denied", "cmd", command, approval.feedback)
         if approval.feedback:
             click.echo(f"ozm: denied cmd — {approval.feedback}", err=True)

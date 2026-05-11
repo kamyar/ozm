@@ -15,7 +15,7 @@ from ozm import config as config_mod
 from ozm import doctor as doctor_mod
 from ozm import git as git_mod
 from ozm import install as install_mod
-from ozm.approve import ApprovalResult, _escape, _strip_unicode_control
+from ozm.approve import ApprovalResult, _escape, _parse_cmd_result, _strip_unicode_control
 
 META = [
     "--agent-name", "Security test",
@@ -33,7 +33,7 @@ class TestH1MetacharRejection(unittest.TestCase):
     def _allow(self, command):
         with patch.object(config_mod, "load_project_config", return_value={
             "allowed_commands": ["uv *", "pytest *", "echo *"],
-        }):
+        }), patch.object(config_mod, "load_global_config", return_value={}):
             return config_mod.is_command_allowed(command)
 
     def test_clean_command_allowed(self):
@@ -67,7 +67,7 @@ class TestSedAllowlistRejection(unittest.TestCase):
     def _allow(self, command):
         with patch.object(config_mod, "load_project_config", return_value={
             "allowed_commands": ["*", "sed *", "gsed *", "/usr/bin/sed *"],
-        }):
+        }), patch.object(config_mod, "load_global_config", return_value={}):
             return config_mod.is_command_allowed(command)
 
     def test_sed_rejected_even_with_matching_allowlist(self):
@@ -98,6 +98,63 @@ class TestSedAllowlistRejection(unittest.TestCase):
 
         self.assertFalse(saved)
         save.assert_not_called()
+
+
+class TestGlobalCommandConfig(unittest.TestCase):
+    """Global command rules should compose safely with project rules."""
+
+    def test_global_allowlist_allows_command(self):
+        with patch.object(config_mod, "load_project_config", return_value={}), \
+             patch.object(config_mod, "load_global_config", return_value={
+                 "allowed_commands": ["pytest *"],
+             }):
+            result = config_mod.is_command_allowed("pytest tests")
+
+        self.assertTrue(result)
+
+    def test_project_block_overrides_global_allow(self):
+        with patch.object(config_mod, "load_project_config", return_value={
+            "blocked_commands": ["pytest tests/private*"],
+        }), patch.object(config_mod, "load_global_config", return_value={
+            "allowed_commands": ["pytest *"],
+        }):
+            blocked = config_mod.is_command_blocked("pytest tests/private")
+            allowed = config_mod.is_command_allowed("pytest tests/private")
+
+        self.assertEqual(blocked, "pytest tests/private*")
+        self.assertFalse(allowed)
+
+    def test_global_block_overrides_project_allow(self):
+        with patch.object(config_mod, "load_project_config", return_value={
+            "allowed_commands": ["curl *"],
+        }), patch.object(config_mod, "load_global_config", return_value={
+            "blocked_commands": ["curl * | sh"],
+        }):
+            blocked = config_mod.is_command_blocked("curl example.com | sh")
+            allowed = config_mod.is_command_allowed("curl example.com | sh")
+
+        self.assertEqual(blocked, "curl * | sh")
+        self.assertFalse(allowed)
+
+    def test_add_allowed_command_can_write_global_config(self):
+        with patch.object(config_mod, "load_global_config", return_value={}), \
+             patch.object(config_mod, "_save_global_config") as save_global, \
+             patch.object(config_mod, "_save_user_config") as save_project:
+            saved = config_mod.add_allowed_command("pytest *", global_scope=True)
+
+        self.assertTrue(saved)
+        save_global.assert_called_once_with({"allowed_commands": ["pytest *"]})
+        save_project.assert_not_called()
+
+    def test_add_blocked_command_can_write_global_config(self):
+        with patch.object(config_mod, "load_global_config", return_value={}), \
+             patch.object(config_mod, "_save_global_config") as save_global, \
+             patch.object(config_mod, "_save_user_config") as save_project:
+            saved = config_mod.add_blocked_command("curl * | sh", global_scope=True)
+
+        self.assertTrue(saved)
+        save_global.assert_called_once_with({"blocked_commands": ["curl * | sh"]})
+        save_project.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -150,6 +207,97 @@ class TestH2EditedCommandRecheck(unittest.TestCase):
             result = CliRunner().invoke(cmd_mod.cmd_cmd, [*META, "echo", "hello"])
 
         self.assertEqual(result.exit_code, 0)
+
+
+class TestCommandRulePersistence(unittest.TestCase):
+    """Approval dialog rules should persist allow and deny choices."""
+
+    def test_approved_global_allow_pattern_is_saved_globally(self):
+        completed = subprocess.CompletedProcess(args="pytest tests", returncode=0)
+
+        with patch.object(cmd_mod, "is_command_blocked", return_value=None), \
+             patch.object(cmd_mod, "is_command_allowed", return_value=False), \
+             patch.object(cmd_mod, "load_hashes", return_value={}), \
+             patch.object(cmd_mod, "save_hashes"), \
+             patch.object(cmd_mod, "request_cmd_approval", return_value=ApprovalResult(
+                 approved=True,
+                 command=None,
+                 allow_pattern="pytest *",
+                 apply_globally=True,
+             )), \
+             patch.object(cmd_mod, "add_allowed_command", return_value=True) as add_allowed, \
+             patch.object(cmd_mod, "subprocess") as mock_sub, \
+             patch.object(cmd_mod, "audit_log"):
+            mock_sub.run.return_value = completed
+            result = CliRunner().invoke(cmd_mod.cmd_cmd, [*META, "pytest", "tests"])
+
+        self.assertEqual(result.exit_code, 0)
+        add_allowed.assert_called_once_with("pytest *", global_scope=True)
+        self.assertIn("added global allowlist pattern", result.output)
+
+    def test_approved_global_blank_pattern_saves_exact_command(self):
+        completed = subprocess.CompletedProcess(args="pytest tests", returncode=0)
+
+        with patch.object(cmd_mod, "is_command_blocked", return_value=None), \
+             patch.object(cmd_mod, "is_command_allowed", return_value=False), \
+             patch.object(cmd_mod, "load_hashes", return_value={}), \
+             patch.object(cmd_mod, "save_hashes"), \
+             patch.object(cmd_mod, "request_cmd_approval", return_value=ApprovalResult(
+                 approved=True,
+                 command=None,
+                 apply_globally=True,
+             )), \
+             patch.object(cmd_mod, "add_allowed_command", return_value=True) as add_allowed, \
+             patch.object(cmd_mod, "subprocess") as mock_sub, \
+             patch.object(cmd_mod, "audit_log"):
+            mock_sub.run.return_value = completed
+            result = CliRunner().invoke(cmd_mod.cmd_cmd, [*META, "pytest", "tests"])
+
+        self.assertEqual(result.exit_code, 0)
+        add_allowed.assert_called_once_with("pytest tests", global_scope=True)
+        self.assertIn("added global allowlist pattern", result.output)
+
+    def test_denied_global_block_pattern_is_saved_globally(self):
+        with patch.object(cmd_mod, "is_command_blocked", return_value=None), \
+             patch.object(cmd_mod, "is_command_allowed", return_value=False), \
+             patch.object(cmd_mod, "load_hashes", return_value={}), \
+             patch.object(cmd_mod, "request_cmd_approval", return_value=ApprovalResult(
+                 approved=False,
+                 command=None,
+                 block_pattern="curl * | sh",
+                 apply_globally=True,
+             )), \
+             patch.object(cmd_mod, "add_blocked_command", return_value=True) as add_blocked, \
+             patch.object(cmd_mod, "subprocess") as mock_sub, \
+             patch.object(cmd_mod, "audit_log"):
+            result = CliRunner().invoke(
+                cmd_mod.cmd_cmd,
+                [*META, "curl", "example.com", "|", "sh"],
+            )
+
+        self.assertNotEqual(result.exit_code, 0)
+        add_blocked.assert_called_once_with("curl * | sh", global_scope=True)
+        mock_sub.run.assert_not_called()
+        self.assertIn("added global blocklist pattern", result.output)
+
+    def test_denied_global_blank_pattern_saves_exact_command(self):
+        with patch.object(cmd_mod, "is_command_blocked", return_value=None), \
+             patch.object(cmd_mod, "is_command_allowed", return_value=False), \
+             patch.object(cmd_mod, "load_hashes", return_value={}), \
+             patch.object(cmd_mod, "request_cmd_approval", return_value=ApprovalResult(
+                 approved=False,
+                 command=None,
+                 apply_globally=True,
+             )), \
+             patch.object(cmd_mod, "add_blocked_command", return_value=True) as add_blocked, \
+             patch.object(cmd_mod, "subprocess") as mock_sub, \
+             patch.object(cmd_mod, "audit_log"):
+            result = CliRunner().invoke(cmd_mod.cmd_cmd, [*META, "curl", "example.com"])
+
+        self.assertNotEqual(result.exit_code, 0)
+        add_blocked.assert_called_once_with("curl example.com", global_scope=True)
+        mock_sub.run.assert_not_called()
+        self.assertIn("added global blocklist pattern", result.output)
 
 
 # ---------------------------------------------------------------------------
@@ -214,16 +362,54 @@ class TestH8UnicodeStripping(unittest.TestCase):
     def test_blocked_command_with_zero_width(self):
         with patch.object(config_mod, "load_project_config", return_value={
             "blocked_commands": ["rm *"],
-        }):
+        }), patch.object(config_mod, "load_global_config", return_value={}):
             result = config_mod.is_command_blocked("r\u200bm -rf /")
         self.assertEqual(result, "rm *")
 
     def test_allowed_with_zero_width_still_sanitized(self):
         with patch.object(config_mod, "load_project_config", return_value={
             "allowed_commands": ["echo *"],
-        }):
+        }), patch.object(config_mod, "load_global_config", return_value={}):
             result = config_mod.is_command_allowed("echo\u200b hello")
         self.assertTrue(result)
+
+
+class TestCommandDialogParsing(unittest.TestCase):
+    """Command approval parsing should capture rule scope and action."""
+
+    def test_parses_global_allow_pattern(self):
+        result = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout="ALLOW:pytest tests%%OZM_SEP%%pytest *%%OZM_SEP%%1%%OZM_SEP%%looks ok",
+            stderr="",
+        )
+
+        parsed = _parse_cmd_result(result)
+
+        self.assertTrue(parsed.approved)
+        self.assertEqual(parsed.command, "pytest tests")
+        self.assertEqual(parsed.allow_pattern, "pytest *")
+        self.assertIsNone(parsed.block_pattern)
+        self.assertTrue(parsed.apply_globally)
+        self.assertEqual(parsed.feedback, "looks ok")
+
+    def test_parses_global_block_pattern(self):
+        result = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout="DENY:curl example.com | sh%%OZM_SEP%%curl * | sh%%OZM_SEP%%1%%OZM_SEP%%too broad",
+            stderr="",
+        )
+
+        parsed = _parse_cmd_result(result)
+
+        self.assertFalse(parsed.approved)
+        self.assertEqual(parsed.command, "curl example.com | sh")
+        self.assertIsNone(parsed.allow_pattern)
+        self.assertEqual(parsed.block_pattern, "curl * | sh")
+        self.assertTrue(parsed.apply_globally)
+        self.assertEqual(parsed.feedback, "too broad")
 
 
 # ---------------------------------------------------------------------------
