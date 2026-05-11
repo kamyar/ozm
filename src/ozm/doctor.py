@@ -8,7 +8,13 @@ import shutil
 
 import click
 
-from ozm.install import ENFORCE_HOOK, HOOK_SCRIPT
+from ozm.install import (
+    CODEX_CONFIG,
+    CODEX_RULES,
+    CODEX_RULES_CONTENT,
+    ENFORCE_HOOK,
+    HOOK_SCRIPT,
+)
 
 CLAUDE_SETTINGS = os.path.expanduser("~/.claude/settings.json")
 OZM_MARKER = "ozm — script execution gate"
@@ -74,10 +80,34 @@ def _check_codex_project_docs() -> tuple[bool, str]:
 
 
 def _check_codex_enforcement() -> tuple[bool | None, str]:
-    return (
-        None,
-        "Codex has no ozm hook; AGENTS.md is advisory and is read when a session starts",
-    )
+    if not os.path.isfile(CODEX_CONFIG):
+        return False, f"Codex config missing: {CODEX_CONFIG} — run 'ozm install'"
+    try:
+        with open(CODEX_CONFIG) as f:
+            config = f.read()
+    except OSError as e:
+        return False, f"Codex config unreadable: {e}"
+
+    if "codex_hooks = true" not in config:
+        return False, "Codex hooks are not enabled — run 'ozm install'"
+    if ENFORCE_HOOK not in config:
+        return False, "ozm Codex hook not found in config.toml — run 'ozm install'"
+    return True, "Codex hook configured in config.toml"
+
+
+def _check_codex_rules() -> tuple[bool, str]:
+    if not os.path.isfile(CODEX_RULES):
+        return False, f"Codex execpolicy rules missing: {CODEX_RULES} — run 'ozm install'"
+    try:
+        with open(CODEX_RULES) as f:
+            content = f.read()
+    except OSError as e:
+        return False, f"Codex execpolicy rules unreadable: {e}"
+    expected_hash = hashlib.sha256(CODEX_RULES_CONTENT.encode()).hexdigest()
+    actual_hash = hashlib.sha256(content.encode()).hexdigest()
+    if actual_hash != expected_hash:
+        return False, "Codex execpolicy rules modified — run 'ozm install' to restore"
+    return True, f"Codex execpolicy rules at {CODEX_RULES}"
 
 
 def _check_pygments() -> tuple[bool, str]:
@@ -105,6 +135,7 @@ def doctor_cmd() -> None:
         ("claude settings", _check_claude_settings),
         ("codex project docs", _check_codex_project_docs),
         ("codex enforcement", _check_codex_enforcement),
+        ("codex rules", _check_codex_rules),
         ("pygments", _check_pygments),
         ("project config", _check_project_config),
     ]

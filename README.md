@@ -54,7 +54,7 @@ pip install ozm
 
 ```bash
 cd your-project
-ozm install --project   # hooks into Claude Code, writes CLAUDE.md + AGENTS.md
+ozm install --project   # hooks into Claude Code + Codex, writes CLAUDE.md + AGENTS.md
 ```
 
 That's it. The agent now routes all Bash commands through `ozm`.
@@ -66,16 +66,16 @@ That's it. The agent now routes all Bash commands through `ozm`.
 ozm works with any AI coding agent that executes shell commands:
 
 - **Claude Code** — hooks into the `PreToolUse` system via `~/.claude/settings.json`. The enforcement hook intercepts all Bash tool calls and blocks anything not routed through ozm.
-- **Codex / OpenAI agents** — reads `AGENTS.md` for tool usage instructions (written by `ozm install --project`)
+- **Codex / OpenAI agents** — enables Codex hooks in `~/.codex/config.toml`, installs additive execpolicy rules in `~/.codex/rules/ozm-enforcement.rules`, and writes `AGENTS.md` for project-level instructions.
 - **Other agents** — any agent that follows instructions in `CLAUDE.md` or `AGENTS.md` will route commands through ozm
 
-For Claude Code, enforcement is automatic via the hook. For other agents, compliance depends on the agent following the instructions in the project's markdown files.
+For Claude Code and Codex, enforcement is automatic via hooks and policy. For other agents, compliance depends on the agent following the instructions in the project's markdown files.
 
-### Why Codex may not use ozm
+### Codex install behavior
 
-Codex does not currently have a shell pre-tool hook that `ozm install` can register. `ozm install --project` writes `AGENTS.md`, and Codex only sees those instructions when the session is started in that project or after the instructions are explicitly provided. If you install ozm after a Codex session is already running, or if Codex is working from a different directory, it will not automatically re-read the new file.
+`ozm install` configures Codex's native hook system and adds an execpolicy rule file that allows `ozm` while forbidding common direct command families such as `git`, `python3`, `bash`, and `./scripts/test.sh`. The hook blocks direct shell tool calls with a clear instruction to use `ozm cmd`, `ozm git`, or `ozm run`.
 
-Use `ozm doctor` inside the project to check both sides: Claude hook status and whether the current project has Codex-readable `AGENTS.md` instructions.
+Restart Codex after installing so new sessions load the updated hook and execpolicy configuration. Use `ozm doctor` inside the project to check Claude hooks, Codex hooks/rules, and project docs.
 
 ## Commands
 
@@ -124,11 +124,12 @@ See [docs/configuration.md](docs/configuration.md) for all options.
 
 ## How it works
 
-1. `ozm install` registers a Claude Code `PreToolUse` hook that intercepts all Bash commands
-2. The hook blocks direct execution and forces everything through `ozm run`, `ozm cmd`, or `ozm git`
-3. Each command/script goes through: blocklist -> allowlist -> project-scoped hash cache -> approval dialog
-4. Approved content hashes are stored per-project in `~/.ozm/hashes.yaml`
-5. Every decision is logged to `~/.ozm/audit.log`
+1. `ozm install` registers shell hooks for Claude Code and Codex
+2. For Codex, `ozm install` also writes additive execpolicy rules under `~/.codex/rules/`
+3. The hook blocks direct execution and forces everything through `ozm run`, `ozm cmd`, or `ozm git`
+4. Each command/script goes through: blocklist -> allowlist -> project-scoped hash cache -> approval dialog
+5. Approved content hashes are stored per-project in `~/.ozm/hashes.yaml`
+6. Every decision is logged to `~/.ozm/audit.log`
 
 On macOS, approvals use native Cocoa dialogs with syntax highlighting (via pygments), dark mode support, and inline feedback. Without a GUI session, the command is blocked and the agent receives a clear error — ozm never silently approves.
 

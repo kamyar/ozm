@@ -3,6 +3,7 @@
 
 import json
 import os
+import shutil
 import stat
 
 import click
@@ -10,16 +11,20 @@ import click
 OZM_DIR = os.path.expanduser("~/.ozm")
 HOOKS_DIR = os.path.join(OZM_DIR, "hooks")
 ENFORCE_HOOK = os.path.join(HOOKS_DIR, "enforce.sh")
+CODEX_CONFIG = os.path.expanduser("~/.codex/config.toml")
+CODEX_RULES_DIR = os.path.expanduser("~/.codex/rules")
+CODEX_RULES = os.path.join(CODEX_RULES_DIR, "ozm-enforcement.rules")
 
 HOOK_SCRIPT = r'''#!/usr/bin/env python3
-import json, sys, re
+import json, sys, re, shlex, os
 
 try:
     data = json.load(sys.stdin)
 except Exception:
     sys.exit(0)
 
-command = data.get("tool_input", {}).get("command", "")
+tool_input = data.get("tool_input", {})
+command = tool_input.get("command", "") or tool_input.get("cmd", "")
 if not command:
     sys.exit(0)
 
@@ -33,32 +38,164 @@ def deny(reason):
 
 SAFE = {"echo", "printf", "pwd", "date", "true", "false", "test"}
 UNSAFE_PATTERNS = re.compile(r"\$\(|`|<\(|>\(|\$\{")
-REDIRECT_PATTERN = re.compile(r"(?:>>?|<)\s*\S")
+
+def split_shell_parts(command):
+    parts = []
+    start = 0
+    quote = None
+    escaped = False
+    i = 0
+    while i < len(command):
+        ch = command[i]
+        if escaped:
+            escaped = False
+            i += 1
+            continue
+        if ch == "\\" and quote != "'":
+            escaped = True
+            i += 1
+            continue
+        if quote:
+            if ch == quote:
+                quote = None
+            i += 1
+            continue
+        if ch in ("'", '"'):
+            quote = ch
+            i += 1
+            continue
+        if command.startswith("&&", i) or command.startswith("||", i):
+            part = command[start:i].strip()
+            if part:
+                parts.append(part)
+            i += 2
+            start = i
+            continue
+        if ch in (";", "|", "\n"):
+            part = command[start:i].strip()
+            if part:
+                parts.append(part)
+            i += 1
+            start = i
+            continue
+        i += 1
+    part = command[start:].strip()
+    if part:
+        parts.append(part)
+    return parts
+
+def first_word(part):
+    try:
+        words = shlex.split(part, posix=True)
+    except Exception:
+        words = part.split()
+    if not words:
+        return ""
+    return os.path.basename(words[0])
+
+def has_top_level_redirection(part):
+    quote = None
+    escaped = False
+    for ch in part:
+        if escaped:
+            escaped = False
+            continue
+        if ch == "\\" and quote != "'":
+            escaped = True
+            continue
+        if quote:
+            if ch == quote:
+                quote = None
+            continue
+        if ch in ("'", '"'):
+            quote = ch
+            continue
+        if ch in (">", "<"):
+            return True
+    return False
 
 if UNSAFE_PATTERNS.search(command):
     deny("Command contains shell expansion ($(), ``, <(), ${}) — use 'ozm cmd ...' instead.")
 
-raw_parts = re.split(r"\s*(?:&&|\|\||;|\||\n)\s*", command)
+raw_parts = split_shell_parts(command)
 is_compound = len(raw_parts) > 1
-stripped_parts = [
-    re.sub(r"""(?:"(?:[^"\\]|\\.)*"|'[^']*')""", '""', part)
-    for part in raw_parts
-]
-for raw_part, part in zip(raw_parts, stripped_parts):
-    part = part.strip()
-    if not part:
+for raw_part in raw_parts:
+    raw_part = raw_part.strip()
+    if not raw_part:
         continue
-    first_word = re.split(r"\s+", part)[0]
-    if first_word == "ozm":
+    word = first_word(raw_part)
+    if word == "ozm":
         continue
-    if first_word in SAFE:
-        if is_compound or REDIRECT_PATTERN.search(part):
+    if word in SAFE:
+        if is_compound or has_top_level_redirection(raw_part):
             deny(f"Use 'ozm cmd {raw_part.strip()}' instead of running commands directly.")
         continue
-    if first_word == "git":
+    if word == "git":
         deny("Use 'ozm git <subcommand>' instead of 'git' directly.")
     deny(f"Use 'ozm cmd {raw_part.strip()}' instead of running commands directly. For script files use 'ozm run <script>'.")
 '''
+
+CODEX_RULES_CONTENT = """# Codex command approval policy for ozm.
+# This file is additive. It does not replace default.rules.
+# Codex applies the most restrictive matching rule, so these forbidden rules
+# override older direct-command allow rules.
+
+prefix_rule(
+    pattern = ["ozm"],
+    decision = "allow",
+    justification = "All shell work must go through ozm.",
+    match = [
+        "ozm cmd ls",
+        "ozm git status",
+        "ozm run ./scripts/test.sh",
+    ],
+)
+
+prefix_rule(
+    pattern = [[
+        "git", "gh", "swift", "npm", "pnpm", "yarn", "bun", "uv",
+        "python", "python3", "pip", "pip3", "cargo", "go", "make",
+        "cmake", "xcodebuild", "bash", "sh", "zsh", "/bin/bash",
+        "/bin/sh", "/bin/zsh", "./scripts/run.sh", "./scripts/test.sh",
+    ]],
+    decision = "forbidden",
+    justification = "Use `ozm cmd <command>` for shell commands, `ozm git <subcommand>` for git, and `ozm run <script>` for scripts.",
+    match = [
+        "git status",
+        "gh pr view 1",
+        "swift test",
+        "python3 -m pytest",
+        "bash -lc ls",
+        "./scripts/test.sh",
+    ],
+    not_match = [
+        "ozm git status",
+        "ozm cmd swift test",
+        "ozm run ./scripts/test.sh",
+    ],
+)
+"""
+
+CODEX_HOOK_BLOCK = """
+
+[[hooks.PreToolUse]]
+matcher = "^(Bash|shell_command|exec_command)$"
+
+[[hooks.PreToolUse.hooks]]
+type = "command"
+command = "{hook}"
+timeout = 10
+statusMessage = "Checking command with ozm"
+
+[[hooks.PermissionRequest]]
+matcher = "^(Bash|shell_command|exec_command)$"
+
+[[hooks.PermissionRequest.hooks]]
+type = "command"
+command = "{hook}"
+timeout = 10
+statusMessage = "Checking approval request with ozm"
+"""
 
 CLAUDE_MD = """# ozm — script execution gate
 
@@ -160,6 +297,83 @@ def _write_file(path: str, content: str) -> None:
     click.echo(f"  wrote: {path}")
 
 
+def _backup(path: str) -> None:
+    if not os.path.exists(path):
+        return
+    backup = f"{path}.bak-ozm"
+    if not os.path.exists(backup):
+        shutil.copy2(path, backup)
+
+
+def _ensure_codex_hooks_feature(config: str) -> str:
+    lines = config.splitlines()
+    out = []
+    in_features = False
+    saw_features = False
+    saw_codex_hooks = False
+
+    for line in lines:
+        stripped = line.strip()
+        is_section = stripped.startswith("[") and stripped.endswith("]")
+        if stripped == "[features]":
+            saw_features = True
+            in_features = True
+            saw_codex_hooks = False
+            out.append(line)
+            continue
+        if in_features and is_section:
+            if not saw_codex_hooks:
+                out.append("codex_hooks = true")
+            in_features = False
+        if in_features and stripped.startswith("codex_hooks"):
+            out.append("codex_hooks = true")
+            saw_codex_hooks = True
+            continue
+        out.append(line)
+
+    if in_features and not saw_codex_hooks:
+        out.append("codex_hooks = true")
+
+    result = "\n".join(out).rstrip()
+    if not saw_features:
+        result += "\n\n[features]\ncodex_hooks = true"
+    return result + "\n"
+
+
+def _configure_codex() -> None:
+    os.makedirs(CODEX_RULES_DIR, exist_ok=True)
+    if os.path.exists(CODEX_RULES):
+        with open(CODEX_RULES) as f:
+            existing_rules = f.read()
+    else:
+        existing_rules = None
+    if existing_rules != CODEX_RULES_CONTENT:
+        _backup(CODEX_RULES)
+        with open(CODEX_RULES, "w") as f:
+            f.write(CODEX_RULES_CONTENT)
+        click.echo(f"  codex rules: {CODEX_RULES}")
+    else:
+        click.echo(f"  codex rules: {CODEX_RULES}")
+
+    os.makedirs(os.path.dirname(CODEX_CONFIG), exist_ok=True)
+    if os.path.exists(CODEX_CONFIG):
+        with open(CODEX_CONFIG) as f:
+            config = f.read()
+    else:
+        config = ""
+
+    next_config = _ensure_codex_hooks_feature(config)
+    hook_block = CODEX_HOOK_BLOCK.format(hook=ENFORCE_HOOK)
+    if ENFORCE_HOOK not in next_config:
+        next_config = next_config.rstrip() + hook_block + "\n"
+
+    if next_config != config:
+        _backup(CODEX_CONFIG)
+        with open(CODEX_CONFIG, "w") as f:
+            f.write(next_config)
+    click.echo(f"  codex: {CODEX_CONFIG}")
+
+
 def _configure_claude_code() -> None:
     claude_dir = os.path.expanduser("~/.claude")
     os.makedirs(claude_dir, exist_ok=True)
@@ -199,6 +413,7 @@ def install_cmd(project: bool) -> None:
     click.echo("ozm: installing...")
     _write_hook_script()
     _configure_claude_code()
+    _configure_codex()
     if project:
         _write_file("CLAUDE.md", CLAUDE_MD)
         _write_file("AGENTS.md", AGENTS_MD)
