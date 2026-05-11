@@ -35,6 +35,8 @@ allowed_commands:
 ```
 
 > **Security note:** Avoid patterns like `"uv run *"`, `"python *"`, or `"uv *"` — these bypass content review for script files. Use `ozm run` for scripts instead, which gates on file content hash.
+>
+> `sed` and `gsed` are never matched by `allowed_commands`, because they can edit files in-place and cannot be safely blanket-approved. Use `rg` for searching, `cat`/`nl`/`head`/`tail` for viewing, or `ozm run <script>` for transformations.
 
 Patterns are matched against both the full command string and the first word (the binary name). Uses Python's `fnmatch` glob syntax:
 

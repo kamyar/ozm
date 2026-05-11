@@ -10,7 +10,14 @@ import click
 
 from ozm.approve import request_cmd_approval, request_override
 from ozm.audit import log as audit_log
-from ozm.config import add_allowed_command, is_command_allowed, is_command_blocked, project_key
+from ozm.config import (
+    add_allowed_command,
+    command_name,
+    disallowed_command_reason,
+    is_command_allowed,
+    is_command_blocked,
+    project_key,
+)
 from ozm.run import load_hashes, save_hashes
 
 CMD_PREFIX = "cmd:"
@@ -82,6 +89,12 @@ def cmd_cmd(command_and_args: tuple[str, ...]) -> None:
         sys.exit(1)
 
     command = " ".join(args)
+    disallowed = disallowed_command_reason(command)
+    if disallowed:
+        audit_log("blocked", "cmd", command)
+        click.echo(f"ozm: blocked command '{command_name(command)}'", err=True)
+        click.echo(f"ozm: {disallowed}", err=True)
+        sys.exit(1)
 
     blocked = is_command_blocked(command)
     if blocked:
@@ -121,6 +134,12 @@ def cmd_cmd(command_and_args: tuple[str, ...]) -> None:
 
     if approval.approved is True:
         run_command = approval.command or command
+        run_disallowed = disallowed_command_reason(run_command)
+        if run_disallowed:
+            audit_log("blocked", "cmd", run_command)
+            click.echo(f"ozm: blocked command '{command_name(run_command)}'", err=True)
+            click.echo(f"ozm: {run_disallowed}", err=True)
+            sys.exit(1)
         if run_command != command:
             recheck = is_command_blocked(run_command)
             if recheck:
@@ -128,8 +147,14 @@ def cmd_cmd(command_and_args: tuple[str, ...]) -> None:
                 click.echo(f"ozm: edited command blocked by pattern '{recheck}'", err=True)
                 sys.exit(1)
         if approval.allow_pattern:
-            add_allowed_command(approval.allow_pattern)
-            click.echo(f"ozm: added allowlist pattern: {approval.allow_pattern}", err=True)
+            if add_allowed_command(approval.allow_pattern):
+                click.echo(f"ozm: added allowlist pattern: {approval.allow_pattern}", err=True)
+            else:
+                reason = disallowed_command_reason(approval.allow_pattern)
+                click.echo(
+                    f"ozm: not adding allowlist pattern '{approval.allow_pattern}': {reason}",
+                    err=True,
+                )
         run_key = project_key(CMD_PREFIX + run_command)
         run_hash = _cmd_hash(run_command)
         hashes[run_key] = run_hash
