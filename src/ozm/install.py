@@ -29,6 +29,12 @@ if not command:
     sys.exit(0)
 
 def deny(reason):
+    reason = (
+        reason
+        + " Include --agent-name \"<what you are working on>\" and "
+        "--agent-description \"<one-line intent>\" on ozm commands. "
+        "If you forgot this, write it to memory before retrying."
+    )
     json.dump({"hookSpecificOutput": {
         "hookEventName": "PreToolUse",
         "permissionDecision": "deny",
@@ -100,6 +106,35 @@ def first_word(part):
         return ""
     return os.path.basename(words[0])
 
+def _flag_value(words, flag):
+    for i, word in enumerate(words):
+        if word == flag and i + 1 < len(words):
+            return words[i + 1]
+        if word.startswith(flag + "="):
+            return word.split("=", 1)[1]
+    return None
+
+def validate_ozm_metadata(part):
+    try:
+        words = shlex.split(part, posix=True)
+    except Exception:
+        return "Could not parse ozm command for agent metadata."
+    if len(words) < 2 or words[1] not in {"run", "cmd", "git"}:
+        return None
+    name = _flag_value(words, "--agent-name")
+    description = _flag_value(words, "--agent-description")
+    if name is None or description is None:
+        return "ozm run/cmd/git requires --agent-name and --agent-description."
+    if not name.strip():
+        return "--agent-name must not be empty."
+    if not description.strip():
+        return "--agent-description must not be empty."
+    if "\n" in name or "\r" in name:
+        return "--agent-name must be one line."
+    if "\n" in description or "\r" in description:
+        return "--agent-description must be exactly one line."
+    return None
+
 def has_top_level_redirection(part):
     quote = None
     escaped = False
@@ -122,7 +157,7 @@ def has_top_level_redirection(part):
     return False
 
 if UNSAFE_PATTERNS.search(command):
-    deny("Command contains shell expansion ($(), ``, <(), ${}) — use 'ozm cmd ...' instead.")
+    deny("Command contains shell expansion ($(), ``, <(), ${}) — use 'ozm cmd --agent-name \"<work>\" --agent-description \"<intent>\" ...' instead.")
 
 raw_parts = split_shell_parts(command)
 is_compound = len(raw_parts) > 1
@@ -134,14 +169,17 @@ for raw_part in raw_parts:
     if word in DISALLOWED:
         deny(DISALLOWED[word])
     if word == "ozm":
+        violation = validate_ozm_metadata(raw_part)
+        if violation:
+            deny(violation)
         continue
     if word in SAFE:
         if is_compound or has_top_level_redirection(raw_part):
-            deny(f"Use 'ozm cmd {raw_part.strip()}' instead of running commands directly.")
+            deny(f"Use 'ozm cmd --agent-name \"<work>\" --agent-description \"<intent>\" {raw_part.strip()}' instead of running commands directly.")
         continue
     if word == "git":
-        deny("Use 'ozm git <subcommand>' instead of 'git' directly.")
-    deny(f"Use 'ozm cmd {raw_part.strip()}' instead of running commands directly. For script files use 'ozm run <script>'.")
+        deny("Use 'ozm git --agent-name \"<work>\" --agent-description \"<intent>\" <subcommand>' instead of 'git' directly.")
+    deny(f"Use 'ozm cmd --agent-name \"<work>\" --agent-description \"<intent>\" {raw_part.strip()}' instead of running commands directly. For script files use 'ozm run --agent-name \"<work>\" --agent-description \"<intent>\" <script>'.")
 '''
 
 CODEX_RULES_CONTENT = """# Codex command approval policy for ozm.
@@ -154,9 +192,9 @@ prefix_rule(
     decision = "allow",
     justification = "All shell work must go through ozm.",
     match = [
-        "ozm cmd ls",
-        "ozm git status",
-        "ozm run ./scripts/test.sh",
+        "ozm cmd --agent-name inspect-tree --agent-description list-files ls",
+        "ozm git --agent-name check-status --agent-description inspect-git-state status",
+        "ozm run --agent-name run-tests --agent-description execute-test-script ./scripts/test.sh",
     ],
 )
 
@@ -168,7 +206,7 @@ prefix_rule(
         "/bin/sh", "/bin/zsh", "./scripts/run.sh", "./scripts/test.sh",
     ]],
     decision = "forbidden",
-    justification = "Use `ozm cmd <command>` for shell commands, `ozm git <subcommand>` for git, and `ozm run <script>` for scripts.",
+    justification = "Use `ozm cmd/run/git --agent-name ... --agent-description ...` so every approval has agent context.",
     match = [
         "git status",
         "gh pr view 1",
@@ -178,9 +216,9 @@ prefix_rule(
         "./scripts/test.sh",
     ],
     not_match = [
-        "ozm git status",
-        "ozm cmd swift test",
-        "ozm run ./scripts/test.sh",
+        "ozm git --agent-name check-status --agent-description inspect-git-state status",
+        "ozm cmd --agent-name swift-tests --agent-description run-swift-tests swift test",
+        "ozm run --agent-name test-script --agent-description execute-test-script ./scripts/test.sh",
     ],
 )
 """
@@ -212,17 +250,18 @@ All script execution and git operations must go through `ozm`.
 
 ## Rules
 
-- **Run scripts:** `ozm run <script> [args...]` — never `python`, `bash`, `./`, or `uv run` directly
-- **Run commands:** `ozm cmd <command> [args...]` — for arbitrary commands (e.g. `ozm cmd uv pip install -e .`)
+- **Always identify the agent work:** every `ozm run`, `ozm cmd`, and `ozm git` invocation must include `--agent-name "<what you are working on>"` and `--agent-description "<one-line intent>"`.
+- **Run scripts:** `ozm run --agent-name "<work>" --agent-description "<intent>" <script> [args...]` — never `python`, `bash`, `./`, or `uv run` directly
+- **Run commands:** `ozm cmd --agent-name "<work>" --agent-description "<intent>" <command> [args...]` — for arbitrary commands (e.g. `ozm cmd --agent-name "Install deps" --agent-description "Install editable package dependencies." uv pip install -e .`)
 - **Avoid sed:** `sed`/`gsed` are blocked because they can edit files in-place. Use `rg` for searching, `cat`/`nl`/`head`/`tail` for viewing, or `ozm run <script>` for transformations.
-- **Commit:** `ozm git commit -m "short message"` — max 72 char subject, max 500 chars total
-- **Push:** `ozm git push` — no force push, no pushing to main/master
+- **Commit:** `ozm git --agent-name "<work>" --agent-description "<intent>" commit -m "short message"` — max 72 char subject, max 500 chars total
+- **Push:** `ozm git --agent-name "<work>" --agent-description "<intent>" push` — no force push, no pushing to main/master
 - **Status:** `ozm status` — show tracked scripts
 - **Reset:** `ozm reset <script>` or `ozm reset --all`
 
 ## Scripts must have a shebang
 
-Always include a shebang line (e.g. `#!/usr/bin/env python3`, `#!/usr/bin/env bash`) as the first line of any script you create. This allows `ozm run` to execute it directly. Never use `ozm cmd python script.py` or `ozm cmd uv run python script.py` — use `ozm run script.py` instead.
+Always include a shebang line (e.g. `#!/usr/bin/env python3`, `#!/usr/bin/env bash`) as the first line of any script you create. This allows `ozm run` to execute it directly. Never use `ozm cmd python script.py` or `ozm cmd uv run python script.py` — use `ozm run --agent-name "<work>" --agent-description "<intent>" script.py` instead.
 
 Keep commit messages short. No heredoc/EOF patterns. Simple `-m "message"` only.
 
@@ -230,10 +269,12 @@ Keep commit messages short. No heredoc/EOF patterns. Simple `-m "message"` only.
 
 If a command is blocked but you believe it's necessary, use `--reason` to request a one-time override from the user:
 
-    ozm git push --reason "Hotfix for production outage, needs to go to main"
-    ozm cmd rm -rf build/ --reason "Clean build artifacts before rebuild"
+    ozm git --agent-name "Ship hotfix" --agent-description "Push the production fix branch." push --reason "Hotfix for production outage, needs to go to main"
+    ozm cmd --agent-name "Clean build" --agent-description "Remove generated build artifacts before rebuild." rm -rf build/ --reason "Clean build artifacts before rebuild"
 
 The user sees your reasoning in a dialog and can approve once. This is never cached or added to allowlists.
+
+If ozm rejects a command because agent metadata is missing or invalid, write the metadata requirement to memory before retrying.
 """
 
 AGENTS_MD = """# ozm — script execution gate
@@ -242,15 +283,16 @@ All script execution and git operations must go through `ozm`.
 
 ## Rules
 
-- **Run scripts:** `ozm run <script> [args...]` — never `python`, `bash`, `./`, or `uv run` directly
-- **Run commands:** `ozm cmd <command> [args...]` — for arbitrary commands (e.g. `ozm cmd uv pip install -e .`)
+- **Always identify the agent work:** every `ozm run`, `ozm cmd`, and `ozm git` invocation must include `--agent-name "<what you are working on>"` and `--agent-description "<one-line intent>"`.
+- **Run scripts:** `ozm run --agent-name "<work>" --agent-description "<intent>" <script> [args...]` — never `python`, `bash`, `./`, or `uv run` directly
+- **Run commands:** `ozm cmd --agent-name "<work>" --agent-description "<intent>" <command> [args...]` — for arbitrary commands (e.g. `ozm cmd --agent-name "Install deps" --agent-description "Install editable package dependencies." uv pip install -e .`)
 - **Avoid sed:** `sed`/`gsed` are blocked because they can edit files in-place. Use `rg` for searching, `cat`/`nl`/`head`/`tail` for viewing, or `ozm run <script>` for transformations.
-- **Commit:** `ozm git commit -m "short message"` — max 72 char subject, max 500 chars total
-- **Push:** `ozm git push` — no force push, no pushing to main/master
+- **Commit:** `ozm git --agent-name "<work>" --agent-description "<intent>" commit -m "short message"` — max 72 char subject, max 500 chars total
+- **Push:** `ozm git --agent-name "<work>" --agent-description "<intent>" push` — no force push, no pushing to main/master
 
 ## Scripts must have a shebang
 
-Always include a shebang line (e.g. `#!/usr/bin/env python3`, `#!/usr/bin/env bash`) as the first line of any script you create. This allows `ozm run` to execute it directly. Never use `ozm cmd python script.py` or `ozm cmd uv run python script.py` — use `ozm run script.py` instead.
+Always include a shebang line (e.g. `#!/usr/bin/env python3`, `#!/usr/bin/env bash`) as the first line of any script you create. This allows `ozm run` to execute it directly. Never use `ozm cmd python script.py` or `ozm cmd uv run python script.py` — use `ozm run --agent-name "<work>" --agent-description "<intent>" script.py` instead.
 
 Keep commit messages short. No heredoc/EOF patterns. Simple `-m "message"` only.
 
@@ -258,10 +300,12 @@ Keep commit messages short. No heredoc/EOF patterns. Simple `-m "message"` only.
 
 If a command is blocked but you believe it's necessary, use `--reason` to request a one-time override from the user:
 
-    ozm git push --reason "Hotfix for production outage, needs to go to main"
-    ozm cmd rm -rf build/ --reason "Clean build artifacts before rebuild"
+    ozm git --agent-name "Ship hotfix" --agent-description "Push the production fix branch." push --reason "Hotfix for production outage, needs to go to main"
+    ozm cmd --agent-name "Clean build" --agent-description "Remove generated build artifacts before rebuild." rm -rf build/ --reason "Clean build artifacts before rebuild"
 
 The user sees your reasoning in a dialog and can approve once. This is never cached or added to allowlists.
+
+If ozm rejects a command because agent metadata is missing or invalid, write the metadata requirement to memory before retrying.
 """
 
 CLAUDE_HOOKS_CONFIG = {

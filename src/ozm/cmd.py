@@ -8,6 +8,7 @@ import sys
 
 import click
 
+from ozm.agent import extract_agent_metadata
 from ozm.approve import request_cmd_approval, request_override
 from ozm.audit import log as audit_log
 from ozm.config import (
@@ -59,6 +60,9 @@ def cmd_cmd(command_and_args: tuple[str, ...]) -> None:
         raise click.ClickException("Nothing to run.")
 
     args = list(command_and_args)
+    args, agent = extract_agent_metadata(args)
+    if not args:
+        raise click.ClickException("Nothing to run.")
     reason = None
     if "--reason" in args:
         idx = args.index("--reason")
@@ -75,7 +79,9 @@ def cmd_cmd(command_and_args: tuple[str, ...]) -> None:
     if match:
         script, shebang = match
         click.echo(
-            f"ozm: use 'ozm run {script}' instead — "
+            "ozm: use "
+            f"'ozm run --agent-name \"{agent.name}\" "
+            f"--agent-description \"{agent.description}\" {script}' instead — "
             f"make sure the script has a shebang ({shebang})",
             err=True,
         )
@@ -83,7 +89,10 @@ def cmd_cmd(command_and_args: tuple[str, ...]) -> None:
 
     if args and args[0] == "git":
         click.echo(
-            "ozm: use 'ozm git <subcommand>' instead of 'ozm cmd git ...'",
+            "ozm: use "
+            "'ozm git --agent-name \"<work>\" "
+            "--agent-description \"<intent>\" <subcommand>' "
+            "instead of 'ozm cmd git ...'",
             err=True,
         )
         sys.exit(1)
@@ -103,7 +112,7 @@ def cmd_cmd(command_and_args: tuple[str, ...]) -> None:
             click.echo(f"ozm: blocked by pattern '{blocked}' in .ozm.yaml", err=True)
             click.echo("ozm: use --reason \"justification\" to request a one-time override", err=True)
             sys.exit(1)
-        approval = request_override(command, f"blocked by pattern '{blocked}'", reason)
+        approval = request_override(command, f"blocked by pattern '{blocked}'", reason, agent)
         if approval.approved is True:
             audit_log("override", "cmd", command, approval.feedback)
             click.echo("ozm: override granted (one-time)", err=True)
@@ -130,7 +139,7 @@ def cmd_cmd(command_and_args: tuple[str, ...]) -> None:
         result = subprocess.run(command, shell=True)
         sys.exit(result.returncode)
 
-    approval = request_cmd_approval(command)
+    approval = request_cmd_approval(command, agent)
 
     if approval.approved is True:
         run_command = approval.command or command

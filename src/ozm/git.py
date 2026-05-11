@@ -7,6 +7,7 @@ import sys
 
 import click
 
+from ozm.agent import AgentMetadata, extract_agent_metadata
 from ozm.approve import request_override
 from ozm.audit import log as audit_log
 from ozm.config import commit_config
@@ -131,14 +132,19 @@ def _extract_reason(args: list[str]) -> tuple[list[str], str | None]:
     return cleaned, reason
 
 
-def _handle_violation(violation: str, command: str, reason: str | None) -> None:
+def _handle_violation(
+    violation: str,
+    command: str,
+    reason: str | None,
+    agent: AgentMetadata,
+) -> None:
     """Block or show override dialog. Exits on block/deny."""
     if not reason:
         click.echo(f"ozm: {violation}", err=True)
         click.echo("ozm: use --reason \"justification\" to request a one-time override", err=True)
         sys.exit(1)
 
-    approval = request_override(command, violation, reason)
+    approval = request_override(command, violation, reason, agent)
 
     if approval.approved is True:
         audit_log("override", "git", command, approval.feedback)
@@ -172,35 +178,36 @@ def _handle_violation(violation: str, command: str, reason: str | None) -> None:
 @click.argument("args", nargs=-1, type=click.UNPROCESSED)
 def git_cmd(args: tuple[str, ...]) -> None:
     """Git pass-through. Enforces rules on commit and push."""
-    if not args:
+    args_list, agent = extract_agent_metadata(list(args))
+    if not args_list:
         subprocess.run(["git"])
         return
 
-    subcmd = args[0]
-    rest = list(args[1:])
+    subcmd = args_list[0]
+    rest = list(args_list[1:])
     rest, reason = _extract_reason(rest)
 
     if subcmd in DANGEROUS_SUBCOMMANDS:
         full_cmd = f"git {subcmd} {' '.join(rest)}"
-        _handle_violation(f"'git {subcmd}' is not allowed", full_cmd, reason)
+        _handle_violation(f"'git {subcmd}' is not allowed", full_cmd, reason, agent)
 
     if subcmd == "config":
         for arg in rest:
             if arg.startswith("alias.") or arg.startswith("core.hooksPath"):
                 full_cmd = f"git {subcmd} {' '.join(rest)}"
-                _handle_violation(f"'git config {arg}' is not allowed", full_cmd, reason)
+                _handle_violation(f"'git config {arg}' is not allowed", full_cmd, reason, agent)
 
     if subcmd == "commit":
         violation = _check_commit(rest)
         if violation:
             full_cmd = f"git {subcmd} {' '.join(rest)}"
-            _handle_violation(violation, full_cmd, reason)
+            _handle_violation(violation, full_cmd, reason, agent)
 
     elif subcmd == "push":
         violation = _check_push(rest)
         if violation:
             full_cmd = f"git {subcmd} {' '.join(rest)}"
-            _handle_violation(violation, full_cmd, reason)
+            _handle_violation(violation, full_cmd, reason, agent)
 
     result = subprocess.run(["git", subcmd, *rest])
     sys.exit(result.returncode)
