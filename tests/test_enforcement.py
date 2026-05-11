@@ -13,20 +13,25 @@ from ozm import install as install_mod
 from ozm import run as run_mod
 from ozm.approve import ApprovalResult
 
+META = [
+    "--agent-name", "Unit test",
+    "--agent-description", "Exercise ozm command behavior.",
+]
+
 
 class CmdTests(unittest.TestCase):
     def test_cmd_rejects_git_passthrough(self):
-        result = CliRunner().invoke(cmd_mod.cmd_cmd, ["git", "status"])
+        result = CliRunner().invoke(cmd_mod.cmd_cmd, [*META, "git", "status"])
 
         self.assertNotEqual(result.exit_code, 0)
-        self.assertIn("use 'ozm git <subcommand>'", result.output)
+        self.assertIn("use 'ozm git --agent-name", result.output)
 
     def test_cmd_rejects_sed_with_alternatives(self):
         with patch.object(cmd_mod, "request_cmd_approval") as request_cmd_approval, \
             patch.object(cmd_mod, "audit_log"):
             result = CliRunner().invoke(
                 cmd_mod.cmd_cmd,
-                ["sed", "-n", "1p", "README.md"],
+                [*META, "sed", "-n", "1p", "README.md"],
             )
 
         self.assertNotEqual(result.exit_code, 0)
@@ -39,7 +44,7 @@ class CmdTests(unittest.TestCase):
         with patch.object(cmd_mod, "audit_log"):
             result = CliRunner().invoke(
                 cmd_mod.cmd_cmd,
-                ["/usr/bin/sed", "-n", "1p", "README.md"],
+                [*META, "/usr/bin/sed", "-n", "1p", "README.md"],
             )
 
         self.assertNotEqual(result.exit_code, 0)
@@ -49,7 +54,7 @@ class CmdTests(unittest.TestCase):
         with patch.object(cmd_mod, "audit_log"):
             result = CliRunner().invoke(
                 cmd_mod.cmd_cmd,
-                ["env", "LC_ALL=C", "sed", "-n", "1p", "README.md"],
+                [*META, "env", "LC_ALL=C", "sed", "-n", "1p", "README.md"],
             )
 
         self.assertNotEqual(result.exit_code, 0)
@@ -67,7 +72,7 @@ class CmdTests(unittest.TestCase):
 
             result = CliRunner().invoke(
                 cmd_mod.cmd_cmd,
-                ["rm", "-rf", "build", "--reason", "clean generated files"],
+                [*META, "rm", "-rf", "build", "--reason", "clean generated files"],
             )
 
         self.assertEqual(result.exit_code, 0)
@@ -122,7 +127,11 @@ class InstallHookTests(unittest.TestCase):
         self.assertIn("deny", result.stdout)
 
     def test_hook_allows_quoted_separator_inside_ozm_command(self):
-        result = self.run_hook('ozm cmd python3 -c "print(1); print(2)"')
+        result = self.run_hook(
+            'ozm cmd --agent-name "Unit test" '
+            '--agent-description "Exercise hook metadata." '
+            'python3 -c "print(1); print(2)"'
+        )
 
         self.assertEqual(result.returncode, 0)
         self.assertEqual(result.stdout.strip(), "")
@@ -183,7 +192,7 @@ class RunTests(unittest.TestCase):
                     "run",
                     return_value=subprocess.CompletedProcess(args=[], returncode=0),
                 ) as run:
-                result = runner.invoke(run_mod.run_cmd, ["hello.sh"])
+                result = runner.invoke(run_mod.run_cmd, [*META, "hello.sh"])
 
         self.assertEqual(result.exit_code, 0)
         run.assert_called_once_with([abs_path])

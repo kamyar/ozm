@@ -5,13 +5,13 @@
 Run a script after content review. The script's SHA-256 hash is recorded on first approval — subsequent runs of the same unmodified file execute immediately.
 
 ```
-ozm run <script> [args...]
+ozm run --agent-name "<work>" --agent-description "<one-line intent>" <script> [args...]
 ```
 
 **First run (or after modification):**
 
 ```
-$ ozm run deploy.sh production
+$ ozm run --agent-name "Deploy production" --agent-description "Run the reviewed production deployment script." deploy.sh production
 ```
 
 A native macOS dialog appears showing the full file with syntax highlighting. You can Allow or Deny, with an optional feedback message that gets printed to stderr for the agent to read.
@@ -21,7 +21,7 @@ If the file has changed since last approval, the dialog shows a syntax-highlight
 **Subsequent runs (unchanged):**
 
 ```
-$ ozm run deploy.sh production
+$ ozm run --agent-name "Deploy production" --agent-description "Run the reviewed production deployment script." deploy.sh production
 # executes immediately, no prompt
 ```
 
@@ -41,11 +41,13 @@ echo "hello"
 
 ```mermaid
 flowchart TD
-    A[ozm run script.py] --> B{File exists?}
-    B -->|No| E[Error: not found]
-    B -->|Yes| C{Hash matches stored?}
-    C -->|Yes| D[Execute immediately]
-    C -->|No| F{New or changed?}
+    A[ozm run with agent metadata] --> B{Metadata valid?}
+    B -->|No| M[Reject with memory reminder]
+    B -->|Yes| C{File exists?}
+    C -->|No| E[Error: not found]
+    C -->|Yes| D{Hash matches stored?}
+    D -->|Yes| X[Execute immediately]
+    D -->|No| F{New or changed?}
     F -->|New| G[Show file content in dialog]
     F -->|Changed| H[Show diff in dialog]
     G --> I{User decision}
@@ -61,30 +63,32 @@ flowchart TD
 Run an arbitrary shell command after approval. The command string is hashed — approve once and it runs without prompting until you reset.
 
 ```
-ozm cmd <command> [args...]
+ozm cmd --agent-name "<work>" --agent-description "<one-line intent>" <command> [args...]
 ```
 
 **Examples:**
 
 ```bash
 # Install a package
-$ ozm cmd uv pip install requests
+$ ozm cmd --agent-name "Install requests" --agent-description "Install the HTTP client dependency." uv pip install requests
 
 # Run a one-liner
-$ ozm cmd curl https://api.example.com/health
+$ ozm cmd --agent-name "Check API health" --agent-description "Call the service health endpoint." curl https://api.example.com/health
 
 # Multi-word commands work naturally
-$ ozm cmd docker compose up -d
+$ ozm cmd --agent-name "Start services" --agent-description "Bring the local Docker stack up." docker compose up -d
 ```
 
 **Script detection:** If ozm detects you're trying to run a script file (e.g. `ozm cmd python script.py`), it will suggest using `ozm run` instead and exit. This ensures scripts go through content review.
 
 ```
-$ ozm cmd python myscript.py
-ozm: use 'ozm run myscript.py' instead — make sure the script has a shebang (#!/usr/bin/env python3)
+$ ozm cmd --agent-name "Run script" --agent-description "Try to execute a Python script." python myscript.py
+ozm: use 'ozm run --agent-name "Run script" --agent-description "Try to execute a Python script." myscript.py' instead — make sure the script has a shebang (#!/usr/bin/env python3)
 ```
 
 **Editable commands:** The macOS approval dialog lets you edit the command before running it. You can also enter an allowlist pattern (e.g. `curl https://api.example.com/*`) that gets saved to `.ozm.yaml` for future use.
+
+**Agent metadata:** `--agent-name` is the short work name shown in the dialog. `--agent-description` must be exactly one line describing what the agent is trying to do. Missing, empty, multiline, or overlong metadata is rejected before execution, with an instruction for the agent to write the requirement to memory before retrying.
 
 **Disallowed commands:** `sed` and `gsed` are blocked even when they appear in `allowed_commands`, because they can edit files in-place and are not safe to blanket approve. Use `rg` for searching, `cat`/`nl`/`head`/`tail` for viewing, or write a small reviewed script and run it with `ozm run <script>` for transformations.
 
@@ -99,7 +103,9 @@ ozm: use 'ozm run myscript.py' instead — make sure the script has a shebang (#
 
 ```mermaid
 flowchart TD
-    A[ozm cmd curl example.com] --> B{Script file detected?}
+    A[ozm cmd with agent metadata] --> Z{Metadata valid?}
+    Z -->|No| M[Reject with memory reminder]
+    Z -->|Yes| B{Script file detected?}
     B -->|Yes| C[Suggest ozm run, exit]
     B -->|No| D{Blocked pattern?}
     D -->|Yes| E[Deny, log]
@@ -120,17 +126,17 @@ flowchart TD
 Git pass-through with rule enforcement on commit and push. All other git subcommands pass through unmodified.
 
 ```
-ozm git <subcommand> [args...]
+ozm git --agent-name "<work>" --agent-description "<one-line intent>" <subcommand> [args...]
 ```
 
 **Commit rules:**
 
 ```bash
 # Normal commit — subject must be <= 72 chars, total <= 500 chars
-$ ozm git commit -m "Fix authentication timeout"
+$ ozm git --agent-name "Commit auth fix" --agent-description "Create a single-line commit for the timeout fix." commit -m "Fix authentication timeout"
 
 # Blocked: subject too long
-$ ozm git commit -m "This is a very long commit message that exceeds the seventy-two character limit for subject lines"
+$ ozm git --agent-name "Commit auth fix" --agent-description "Create a single-line commit for the timeout fix." commit -m "This is a very long commit message that exceeds the seventy-two character limit for subject lines"
 # ozm: commit blocked:
 #   - Subject line is 97 chars (max 72)
 ```
@@ -139,24 +145,24 @@ $ ozm git commit -m "This is a very long commit message that exceeds the seventy
 
 ```bash
 # Normal push
-$ ozm git push origin feature-branch
+$ ozm git --agent-name "Push feature" --agent-description "Publish the current feature branch." push origin feature-branch
 
 # Blocked: force push
-$ ozm git push --force
+$ ozm git --agent-name "Push feature" --agent-description "Publish the current feature branch." push --force
 # ozm: force push is not allowed
 
 # Blocked: push to protected branch
-$ ozm git push
+$ ozm git --agent-name "Push feature" --agent-description "Publish the current feature branch." push
 # (on main) ozm: pushing to 'main' is not allowed
 ```
 
 **Other git commands pass through unchanged:**
 
 ```bash
-$ ozm git status
-$ ozm git diff
-$ ozm git log --oneline -10
-$ ozm git branch -a
+$ ozm git --agent-name "Inspect repo" --agent-description "Check the current git state." status
+$ ozm git --agent-name "Inspect diff" --agent-description "Review unstaged changes." diff
+$ ozm git --agent-name "Inspect history" --agent-description "Read recent commit history." log --oneline -10
+$ ozm git --agent-name "Inspect branches" --agent-description "List available branches." branch -a
 ```
 
 **Configurable rules** (via `.ozm.yaml`):

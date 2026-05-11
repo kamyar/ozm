@@ -8,6 +8,8 @@ import tempfile
 import unicodedata
 from typing import NamedTuple
 
+from ozm.agent import AgentMetadata, extract_agent_metadata_from_command
+
 
 def _secure_tmpfile(suffix: str, content: str) -> str:
     path = tempfile.mktemp(suffix=suffix)
@@ -39,25 +41,41 @@ def _get_git_diff(path: str) -> str | None:
     return None
 
 
-def request_approval(script: str, label: str) -> ApprovalResult:
+def request_approval(script: str, label: str, agent: AgentMetadata) -> ApprovalResult:
     """Ask the user to review and approve a script via OS-native UI."""
     diff = _get_git_diff(script) if label == "CHANGED" else None
     if platform.system() == "Darwin":
-        return _approve_file_macos(script, label, diff=diff)
+        return _approve_file_macos(script, label, agent, diff=diff)
     return ApprovalResult(approved=None)
 
 
-def request_cmd_approval(command: str) -> ApprovalResult:
+def request_cmd_approval(
+    command: str,
+    agent: AgentMetadata | None = None,
+) -> ApprovalResult:
     """Ask the user to approve an arbitrary command via OS-native dialog."""
+    command, extracted = extract_agent_metadata_from_command(command)
+    if extracted is not None:
+        agent = extracted
+    if agent is None:
+        agent = AgentMetadata(
+            name="Command approval",
+            description="Review this command before execution.",
+        )
     if platform.system() == "Darwin":
-        return _approve_cmd_macos(command)
+        return _approve_cmd_macos(command, agent)
     return ApprovalResult(approved=None)
 
 
-def request_override(command: str, violation: str, reason: str) -> ApprovalResult:
+def request_override(
+    command: str,
+    violation: str,
+    reason: str,
+    agent: AgentMetadata,
+) -> ApprovalResult:
     """Ask the user for a one-time override of a blocked operation."""
     if platform.system() == "Darwin":
-        return _override_macos(command, violation, reason)
+        return _override_macos(command, violation, reason, agent)
     return ApprovalResult(approved=None)
 
 
@@ -73,6 +91,10 @@ def _strip_unicode_control(s: str) -> str:
 def _escape(s: str) -> str:
     s = _strip_unicode_control(s)
     return s.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _agent_context(agent: AgentMetadata) -> str:
+    return f"Agent: {agent.name} — {agent.description}"
 
 
 def _is_dark_mode() -> bool:
@@ -251,16 +273,23 @@ def _parse_cocoa_result(result: subprocess.CompletedProcess) -> ApprovalResult:
     return ApprovalResult(approved=None, feedback=f"unexpected output: {output[:200]}")
 
 
-def _approve_file_macos(script: str, label: str, *, diff: str | None = None) -> ApprovalResult:
+def _approve_file_macos(
+    script: str,
+    label: str,
+    agent: AgentMetadata,
+    *,
+    diff: str | None = None,
+) -> ApprovalResult:
     abs_path = os.path.abspath(script)
     line_count = _count_lines(script)
-    title = f"[{label}] {os.path.basename(script)}"
+    title = f"[{label}] {agent.name}"
+    agent_context = _agent_context(agent)
 
     rtf_tmp = None
     diff_tmp = None
 
     if diff:
-        subtitle = f"{abs_path} — diff ({line_count} lines total)"
+        subtitle = f"{agent_context} — {abs_path} — diff ({line_count} lines total)"
         diff_rtf = _render_diff_rtf(diff)
         if diff_rtf:
             diff_tmp = _secure_tmpfile(".rtf", diff_rtf)
@@ -271,7 +300,7 @@ def _approve_file_macos(script: str, label: str, *, diff: str | None = None) -> 
             load_section = _LOAD_PLAIN.replace("__FILEPATH__", _escape(diff_tmp))
             set_section = _SET_PLAIN
     else:
-        subtitle = f"{abs_path} — {line_count} lines"
+        subtitle = f"{agent_context} — {abs_path} — {line_count} lines"
         rtf_content = _render_rtf(abs_path)
         if rtf_content:
             rtf_tmp = _secure_tmpfile(".rtf", rtf_content)
@@ -330,7 +359,53 @@ alert's setAlertStyle:(current application's NSAlertStyleWarning)
 alert's addButtonWithTitle:"Allow"
 alert's addButtonWithTitle:"Deny"
 
-set accessory to current application's NSView's alloc()'s initWithFrame:(current application's NSMakeRect(0, 0, 560, 190))
+set accessory to current application's NSView's alloc()'s initWithFrame:(current application's NSMakeRect(0, 0, 560, 266))
+
+set theAppearance to current application's NSApp's effectiveAppearance()
+set appearanceName to (theAppearance's |name|()) as text
+if appearanceName contains "Dark" then
+    set metaBgColor to current application's NSColor's colorWithRed:0.14 green:0.16 blue:0.19 alpha:1.0
+    set nameBgColor to current application's NSColor's colorWithRed:0.20 green:0.28 blue:0.38 alpha:1.0
+    set descBgColor to current application's NSColor's colorWithRed:0.18 green:0.30 blue:0.23 alpha:1.0
+    set nameTextColor to current application's NSColor's colorWithRed:0.78 green:0.88 blue:1.0 alpha:1.0
+    set descTextColor to current application's NSColor's colorWithRed:0.80 green:0.95 blue:0.84 alpha:1.0
+else
+    set metaBgColor to current application's NSColor's colorWithRed:0.96 green:0.98 blue:1.0 alpha:1.0
+    set nameBgColor to current application's NSColor's colorWithRed:0.88 green:0.94 blue:1.0 alpha:1.0
+    set descBgColor to current application's NSColor's colorWithRed:0.90 green:0.98 blue:0.92 alpha:1.0
+    set nameTextColor to current application's NSColor's colorWithRed:0.12 green:0.24 blue:0.45 alpha:1.0
+    set descTextColor to current application's NSColor's colorWithRed:0.10 green:0.34 blue:0.18 alpha:1.0
+end if
+
+set metaPanel to current application's NSView's alloc()'s initWithFrame:(current application's NSMakeRect(0, 196, 560, 64))
+metaPanel's setWantsLayer:true
+metaPanel's layer()'s setBackgroundColor:(metaBgColor's CGColor())
+metaPanel's layer()'s setCornerRadius:8
+accessory's addSubview:metaPanel
+
+set nameChip to current application's NSView's alloc()'s initWithFrame:(current application's NSMakeRect(8, 35, 544, 22))
+nameChip's setWantsLayer:true
+nameChip's layer()'s setBackgroundColor:(nameBgColor's CGColor())
+nameChip's layer()'s setCornerRadius:6
+metaPanel's addSubview:nameChip
+
+set descChip to current application's NSView's alloc()'s initWithFrame:(current application's NSMakeRect(8, 8, 544, 22))
+descChip's setWantsLayer:true
+descChip's layer()'s setBackgroundColor:(descBgColor's CGColor())
+descChip's layer()'s setCornerRadius:6
+metaPanel's addSubview:descChip
+
+set agentLabel to current application's NSTextField's labelWithString:"__AGENT_NAME__"
+agentLabel's setFrame:(current application's NSMakeRect(16, 38, 528, 16))
+agentLabel's setFont:(current application's NSFont's boldSystemFontOfSize:12)
+agentLabel's setTextColor:nameTextColor
+metaPanel's addSubview:agentLabel
+
+set descLabel to current application's NSTextField's labelWithString:"__AGENT_DESCRIPTION__"
+descLabel's setFrame:(current application's NSMakeRect(16, 11, 528, 16))
+descLabel's setFont:(current application's NSFont's systemFontOfSize:11)
+descLabel's setTextColor:descTextColor
+metaPanel's addSubview:descLabel
 
 set cmdLabel to current application's NSTextField's labelWithString:"Run:"
 cmdLabel's setFrame:(current application's NSMakeRect(0, 167, 560, 16))
@@ -402,8 +477,13 @@ def _parse_cmd_result(result: subprocess.CompletedProcess) -> ApprovalResult:
     return ApprovalResult(approved=None)
 
 
-def _approve_cmd_macos(command: str) -> ApprovalResult:
-    applescript = _COCOA_CMD_DIALOG.replace("__COMMAND__", _escape(command))
+def _approve_cmd_macos(command: str, agent: AgentMetadata) -> ApprovalResult:
+    applescript = (
+        _COCOA_CMD_DIALOG
+        .replace("__COMMAND__", _escape(command))
+        .replace("__AGENT_NAME__", _escape(agent.name))
+        .replace("__AGENT_DESCRIPTION__", _escape(agent.description))
+    )
 
     try:
         tmp = _secure_tmpfile(".applescript", applescript)
@@ -433,8 +513,8 @@ current application's NSApp's activateIgnoringOtherApps:true
 ''' + _EDIT_MENU + '''\
 
 set alert to current application's NSAlert's alloc()'s init()
-alert's setMessageText:"Override: __VIOLATION__"
-alert's setInformativeText:"__COMMAND__"
+alert's setMessageText:"Override: __AGENT_NAME__"
+alert's setInformativeText:"__AGENT_DESCRIPTION__ — __VIOLATION__ — __COMMAND__"
 alert's setAlertStyle:(current application's NSAlertStyleCritical)
 alert's addButtonWithTitle:"Allow Once"
 alert's addButtonWithTitle:"Deny"
@@ -471,12 +551,19 @@ end if
 '''
 
 
-def _override_macos(command: str, violation: str, reason: str) -> ApprovalResult:
+def _override_macos(
+    command: str,
+    violation: str,
+    reason: str,
+    agent: AgentMetadata,
+) -> ApprovalResult:
     applescript = (
         _COCOA_OVERRIDE_DIALOG
         .replace("__VIOLATION__", _escape(violation))
         .replace("__COMMAND__", _escape(command))
         .replace("__REASON__", _escape(reason))
+        .replace("__AGENT_NAME__", _escape(agent.name))
+        .replace("__AGENT_DESCRIPTION__", _escape(agent.description))
     )
 
     try:

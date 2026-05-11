@@ -127,11 +127,12 @@ See [docs/configuration.md](docs/configuration.md) for all options.
 1. `ozm install` registers shell hooks for Claude Code and Codex
 2. For Codex, `ozm install` also writes additive execpolicy rules under `~/.codex/rules/`
 3. The hook blocks direct execution and forces everything through `ozm run`, `ozm cmd`, or `ozm git`
-4. Each command/script goes through: blocklist -> allowlist -> project-scoped hash cache -> approval dialog
-5. Approved content hashes are stored per-project in `~/.ozm/hashes.yaml`
-6. Every decision is logged to `~/.ozm/audit.log`
+4. Each `ozm run`, `ozm cmd`, and `ozm git` call must include `--agent-name "<what you are working on>"` and `--agent-description "<one-line intent>"`; missing or multiline metadata is rejected before execution
+5. Each command/script goes through: blocklist -> allowlist -> project-scoped hash cache -> approval dialog
+6. Approved content hashes are stored per-project in `~/.ozm/hashes.yaml`
+7. Every decision is logged to `~/.ozm/audit.log`
 
-On macOS, approvals use native Cocoa dialogs with syntax highlighting (via pygments), dark mode support, and inline feedback. Without a GUI session, the command is blocked and the agent receives a clear error — ozm never silently approves.
+On macOS, approvals use native Cocoa dialogs with syntax highlighting (via pygments), dark mode support, agent work context, and inline feedback. Without a GUI session, the command is blocked and the agent receives a clear error — ozm never silently approves.
 
 ## Requirements
 

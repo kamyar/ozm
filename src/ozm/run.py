@@ -10,6 +10,7 @@ import sys
 import click
 import yaml
 
+from ozm.agent import extract_agent_metadata
 from ozm.approve import request_approval
 from ozm.audit import log as audit_log
 from ozm.config import project_key
@@ -64,10 +65,16 @@ def ensure_executable(path: str) -> None:
     "run",
     context_settings={"ignore_unknown_options": True, "allow_extra_args": True},
 )
-@click.argument("script")
-@click.argument("args", nargs=-1, type=click.UNPROCESSED)
-def run_cmd(script: str, args: tuple[str, ...]) -> None:
+@click.argument("items", nargs=-1, type=click.UNPROCESSED, required=True)
+def run_cmd(items: tuple[str, ...]) -> None:
     """Run a script after content review (hash-gated)."""
+    parts, agent = extract_agent_metadata(list(items))
+    if not parts:
+        raise click.ClickException("Provide a script to run.")
+
+    script = parts[0]
+    args = tuple(parts[1:])
+
     if not os.path.exists(script):
         raise click.ClickException(f"{script}: not found")
 
@@ -86,7 +93,7 @@ def run_cmd(script: str, args: tuple[str, ...]) -> None:
 
     label = "NEW" if stored_hash is None else "CHANGED"
 
-    approval = request_approval(script, label)
+    approval = request_approval(script, label, agent)
 
     if approval.approved is True:
         hashes[key] = current_hash
