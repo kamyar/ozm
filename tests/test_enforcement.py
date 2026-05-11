@@ -87,6 +87,38 @@ class InstallHookTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0)
         self.assertIn("deny", result.stdout)
 
+    def test_hook_allows_quoted_separator_inside_ozm_command(self):
+        result = self.run_hook('ozm cmd python3 -c "print(1); print(2)"')
+
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stdout.strip(), "")
+
+    def test_configure_codex_writes_hook_and_rules(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            config = os.path.abspath("codex/config.toml")
+            rules = os.path.abspath("codex/rules/ozm-enforcement.rules")
+            hook = os.path.abspath("ozm/hooks/enforce.sh")
+
+            with patch.object(install_mod, "CODEX_CONFIG", config), \
+                patch.object(install_mod, "CODEX_RULES", rules), \
+                patch.object(
+                    install_mod,
+                    "CODEX_RULES_DIR",
+                    os.path.dirname(rules),
+                ), \
+                patch.object(install_mod, "ENFORCE_HOOK", hook):
+                install_mod._configure_codex()
+
+            with open(config) as f:
+                config_text = f.read()
+            with open(rules) as f:
+                rules_text = f.read()
+
+        self.assertIn("codex_hooks = true", config_text)
+        self.assertIn(hook, config_text)
+        self.assertIn('decision = "forbidden"', rules_text)
+
 
 class RunTests(unittest.TestCase):
     def test_cached_bare_script_runs_by_absolute_path(self):

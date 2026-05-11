@@ -338,6 +338,10 @@ class TestHookParserRegression(unittest.TestCase):
         result = self._run_hook("ozm cmd echo safe; echo PWNED")
         self.assertIn("deny", result.stdout)
 
+    def test_quoted_semicolon_inside_ozm_command_allowed(self):
+        result = self._run_hook('ozm cmd python3 -c "print(1); print(2)"')
+        self.assertEqual(result.stdout.strip(), "")
+
 
 if __name__ == "__main__":
     unittest.main()
