@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Per-project configuration from ~/.ozm/projects/.
+"""Configuration from ~/.ozm/config.yaml and ~/.ozm/projects/.
 
 Config files live exclusively in ~/.ozm/projects/<name>-<hash>.yaml.
 In-repo .ozm.yaml is never read at runtime — use `ozm trust` to
@@ -80,6 +80,7 @@ OZM_DIR = os.path.expanduser("~/.ozm")
 if os.path.islink(OZM_DIR):
     raise RuntimeError(f"~/.ozm is a symlink — refusing to load config (possible tampering)")
 PROJECTS_DIR = os.path.join(OZM_DIR, "projects")
+GLOBAL_CONFIG = os.path.join(OZM_DIR, "config.yaml")
 
 
 def find_project_root() -> str:
@@ -102,6 +103,11 @@ def _project_config_path() -> str:
     return os.path.join(PROJECTS_DIR, f"{name}-{slug}.yaml")
 
 
+def _global_config_path() -> str:
+    """Path to the user-owned global config."""
+    return GLOBAL_CONFIG
+
+
 def _load_yaml(path: str) -> dict:
     if not os.path.exists(path):
         return {}
@@ -115,6 +121,11 @@ def load_project_config() -> dict:
     return _load_yaml(_project_config_path())
 
 
+def load_global_config() -> dict:
+    """Load config from ~/.ozm/config.yaml."""
+    return _load_yaml(_global_config_path())
+
+
 def _save_user_config(config: dict) -> None:
     """Save to the user-owned config file in ~/.ozm/projects/."""
     path = _project_config_path()
@@ -123,55 +134,79 @@ def _save_user_config(config: dict) -> None:
         yaml.dump(config, f, default_flow_style=False, sort_keys=False)
 
 
-def is_command_blocked(command: str) -> str | None:
-    """Check if a command matches any pattern in blocked_commands."""
-    command = sanitize_command(command)
-    config = load_project_config()
-    patterns = config.get("blocked_commands", [])
-    if not isinstance(patterns, list):
-        return None
+def _save_global_config(config: dict) -> None:
+    """Save to the user-owned global config file."""
+    path = _global_config_path()
+    os.makedirs(OZM_DIR, exist_ok=True)
+    with open(path, "w") as f:
+        yaml.dump(config, f, default_flow_style=False, sort_keys=False)
+
+
+def _command_configs() -> list[dict]:
+    """Return command configs in local-to-global order."""
+    return [load_project_config(), load_global_config()]
+
+
+def _matching_pattern(command: str, key: str) -> str | None:
     first_word = command.split()[0] if command.strip() else ""
-    for pattern in patterns:
-        if not isinstance(pattern, str):
+    for config in _command_configs():
+        patterns = config.get(key, [])
+        if not isinstance(patterns, list):
             continue
-        if fnmatch.fnmatch(command, pattern) or fnmatch.fnmatch(first_word, pattern):
-            return pattern
+        for pattern in patterns:
+            if not isinstance(pattern, str):
+                continue
+            if fnmatch.fnmatch(command, pattern) or fnmatch.fnmatch(first_word, pattern):
+                return pattern
     return None
 
 
+def is_command_blocked(command: str) -> str | None:
+    """Check if a command matches any pattern in blocked_commands."""
+    command = sanitize_command(command)
+    return _matching_pattern(command, "blocked_commands")
+
+
 def is_command_allowed(command: str) -> bool:
-    """Check if a command matches any pattern in the project's allowed_commands."""
+    """Check if a command matches any allowed_commands pattern."""
     command = sanitize_command(command)
     if disallowed_command_reason(command):
         return False
     if SHELL_METACHARS.search(command):
         return False
-    config = load_project_config()
-    patterns = config.get("allowed_commands", [])
-    if not isinstance(patterns, list):
+    if is_command_blocked(command):
         return False
-    first_word = command.split()[0] if command.strip() else ""
-    for pattern in patterns:
-        if not isinstance(pattern, str):
-            continue
-        if fnmatch.fnmatch(command, pattern) or fnmatch.fnmatch(first_word, pattern):
-            return True
-    return False
+    return _matching_pattern(command, "allowed_commands") is not None
 
 
-def add_allowed_command(pattern: str) -> bool:
-    """Append a pattern to allowed_commands in the user-owned config."""
-    if disallowed_command_reason(pattern):
+def _add_command_pattern(key: str, pattern: str, *, global_scope: bool) -> bool:
+    pattern = sanitize_command(pattern).strip()
+    if not pattern:
         return False
-    config = load_project_config()
-    commands = config.get("allowed_commands", [])
+    config = load_global_config() if global_scope else load_project_config()
+    commands = config.get(key, [])
     if not isinstance(commands, list):
         commands = []
     if pattern not in commands:
         commands.append(pattern)
-        config["allowed_commands"] = commands
-        _save_user_config(config)
+        config[key] = commands
+        if global_scope:
+            _save_global_config(config)
+        else:
+            _save_user_config(config)
     return True
+
+
+def add_allowed_command(pattern: str, *, global_scope: bool = False) -> bool:
+    """Append a pattern to allowed_commands in user-owned config."""
+    if disallowed_command_reason(pattern):
+        return False
+    return _add_command_pattern("allowed_commands", pattern, global_scope=global_scope)
+
+
+def add_blocked_command(pattern: str, *, global_scope: bool = False) -> bool:
+    """Append a pattern to blocked_commands in user-owned config."""
+    return _add_command_pattern("blocked_commands", pattern, global_scope=global_scope)
 
 
 def commit_config() -> dict:

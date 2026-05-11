@@ -1,6 +1,9 @@
 # Configuration
 
-ozm keeps all configuration in `~/.ozm/projects/` — outside the repo, where agents can't reach it.
+ozm keeps runtime configuration outside the repo, where agents can't silently activate it:
+
+- `~/.ozm/config.yaml` for global command allowlists and blocklists
+- `~/.ozm/projects/<name>-<hash>.yaml` for project command rules and commit rules
 
 The in-repo `.ozm.yaml` is never read at runtime. It serves as a template: run `ozm trust` to snapshot it into `~/.ozm/projects/`, where it becomes the active config. This is a security boundary — agents can edit `.ozm.yaml` all they want, but it has no effect until a human explicitly trusts it.
 
@@ -11,6 +14,7 @@ The in-repo `.ozm.yaml` is never read at runtime. It serves as a template: run `
 $ ozm config
 project: /Users/you/myproject
 config:  /Users/you/.ozm/projects/myproject-a1b2c3d4e5f6g7h8.yaml
+global:  /Users/you/.ozm/config.yaml
 status:  not found — run 'ozm trust' to import .ozm.yaml
 
 # Import the repo's .ozm.yaml
@@ -18,13 +22,13 @@ $ ozm trust
 ozm: copied /Users/you/myproject/.ozm.yaml -> /Users/you/.ozm/projects/myproject-a1b2c3d4.yaml
 ```
 
-After trusting, you can edit `~/.ozm/projects/myproject-*.yaml` directly. Allowlist patterns added via the approval dialog are saved there automatically.
+After trusting, you can edit `~/.ozm/projects/myproject-*.yaml` directly. Allowlist and blocklist patterns added via the approval dialog are saved there automatically. If you check **Apply globally** in the dialog, the rule is saved to `~/.ozm/config.yaml` instead. If the rule field is blank, ozm saves the exact command globally.
 
 ## Config options
 
 ### allowed_commands
 
-A list of glob patterns. Commands matching any pattern skip the approval dialog entirely.
+A list of glob patterns. Commands matching any pattern skip the approval dialog entirely unless they also match a blocklist.
 
 ```yaml
 allowed_commands:
@@ -59,7 +63,22 @@ blocked_commands:
   - "chmod 777 *"
 ```
 
-Blocklist is checked before the allowlist. If a command matches both, it is blocked.
+Global and project blocklists are checked before all allowlists. If a command matches both, it is blocked.
+
+### Global command rules
+
+`~/.ozm/config.yaml` supports the same `allowed_commands` and `blocked_commands` sections as project config:
+
+```yaml
+allowed_commands:
+  - pytest
+  - "gh pr view *"
+
+blocked_commands:
+  - "curl * | sh"
+```
+
+Use global rules for commands that are safe across projects. Use project rules for commands whose safety depends on a repository, environment, or service. Within the same action, project rules are checked before global rules, but every blocklist always wins over every allowlist.
 
 ### commit
 
@@ -84,9 +103,9 @@ commit:
 
 ```mermaid
 flowchart TD
-    A[Command received] --> B{Matches blocked_commands?}
+    A[Command received] --> B{Matches global/project blocked_commands?}
     B -->|Yes| C[Blocked immediately]
-    B -->|No| D{Matches allowed_commands?}
+    B -->|No| D{Matches global/project allowed_commands?}
     D -->|Yes| E[Run immediately]
     D -->|No| F{Hash cached from prior approval?}
     F -->|Yes| E
@@ -97,6 +116,7 @@ flowchart TD
 
 | Path | Purpose |
 |------|---------|
+| `config.yaml` | Global command allowlists and blocklists |
 | `projects/<name>-<hash>.yaml` | Per-project config (allowlists, blocklists, commit rules) |
 | `hashes.yaml` | Project-scoped SHA-256 hashes of approved scripts and commands |
 | `audit.log` | Append-only log of all approvals, denials, and blocks |

@@ -24,6 +24,8 @@ class ApprovalResult(NamedTuple):
     feedback: str | None = None
     command: str | None = None
     allow_pattern: str | None = None
+    block_pattern: str | None = None
+    apply_globally: bool = False
 
 
 def _get_git_diff(path: str) -> str | None:
@@ -354,12 +356,12 @@ current application's NSApp's activateIgnoringOtherApps:true
 
 set alert to current application's NSAlert's alloc()'s init()
 alert's setMessageText:"Command"
-alert's setInformativeText:"Edit the command or add an allowlist pattern."
+alert's setInformativeText:"Edit the command or add an allow/block rule."
 alert's setAlertStyle:(current application's NSAlertStyleWarning)
 alert's addButtonWithTitle:"Allow"
 alert's addButtonWithTitle:"Deny"
 
-set accessory to current application's NSView's alloc()'s initWithFrame:(current application's NSMakeRect(0, 0, 560, 266))
+set accessory to current application's NSView's alloc()'s initWithFrame:(current application's NSMakeRect(0, 0, 560, 291))
 
 set theAppearance to current application's NSApp's effectiveAppearance()
 set appearanceName to (theAppearance's |name|()) as text
@@ -377,7 +379,7 @@ else
     set descTextColor to current application's NSColor's colorWithRed:0.10 green:0.34 blue:0.18 alpha:1.0
 end if
 
-set metaPanel to current application's NSView's alloc()'s initWithFrame:(current application's NSMakeRect(0, 196, 560, 64))
+set metaPanel to current application's NSView's alloc()'s initWithFrame:(current application's NSMakeRect(0, 221, 560, 64))
 metaPanel's setWantsLayer:true
 metaPanel's layer()'s setBackgroundColor:(metaBgColor's CGColor())
 metaPanel's layer()'s setCornerRadius:8
@@ -408,12 +410,12 @@ descLabel's setTextColor:descTextColor
 metaPanel's addSubview:descLabel
 
 set cmdLabel to current application's NSTextField's labelWithString:"Run:"
-cmdLabel's setFrame:(current application's NSMakeRect(0, 167, 560, 16))
+cmdLabel's setFrame:(current application's NSMakeRect(0, 192, 560, 16))
 cmdLabel's setFont:(current application's NSFont's systemFontOfSize:11)
 cmdLabel's setTextColor:(current application's NSColor's secondaryLabelColor())
 accessory's addSubview:cmdLabel
 
-set cmdScroll to current application's NSScrollView's alloc()'s initWithFrame:(current application's NSMakeRect(0, 90, 560, 75))
+set cmdScroll to current application's NSScrollView's alloc()'s initWithFrame:(current application's NSMakeRect(0, 115, 560, 75))
 cmdScroll's setHasVerticalScroller:true
 cmdScroll's setBorderType:(current application's NSBezelBorder)
 set cmdSize to cmdScroll's contentSize()
@@ -426,16 +428,24 @@ cmdTc's setWidthTracksTextView:true
 cmdScroll's setDocumentView:cmdField
 accessory's addSubview:cmdScroll
 
-set patLabel to current application's NSTextField's labelWithString:"Allow pattern (saved to trusted project config):"
-patLabel's setFrame:(current application's NSMakeRect(0, 67, 560, 16))
+set patLabel to current application's NSTextField's labelWithString:"Rule pattern (blank + Apply globally uses exact command):"
+patLabel's setFrame:(current application's NSMakeRect(0, 92, 560, 16))
 patLabel's setFont:(current application's NSFont's systemFontOfSize:11)
 patLabel's setTextColor:(current application's NSColor's secondaryLabelColor())
 accessory's addSubview:patLabel
 
-set patField to current application's NSTextField's alloc()'s initWithFrame:(current application's NSMakeRect(0, 42, 560, 24))
+set patField to current application's NSTextField's alloc()'s initWithFrame:(current application's NSMakeRect(0, 67, 560, 24))
 patField's setPlaceholderString:"e.g. curl httpbin.org/*"
 patField's setFont:(current application's NSFont's fontWithName:"Menlo" |size|:12)
 accessory's addSubview:patField
+
+set globalBox to current application's NSButton's alloc()'s initWithFrame:(current application's NSMakeRect(0, 39, 560, 20))
+globalBox's setButtonType:(current application's NSButtonTypeSwitch)
+globalBox's setTitle:"Apply globally"
+globalBox's setFrame:(current application's NSMakeRect(0, 39, 560, 20))
+globalBox's setFont:(current application's NSFont's systemFontOfSize:12)
+globalBox's setAllowsMixedState:false
+accessory's addSubview:globalBox
 
 set fb to current application's NSTextField's alloc()'s initWithFrame:(current application's NSMakeRect(0, 5, 560, 24))
 fb's setPlaceholderString:"Feedback for the agent..."
@@ -448,13 +458,17 @@ alert's |window|()'s setLevel:(current application's NSFloatingWindowLevel)
 set response to alert's runModal()
 set editedCmd to cmdField's |string|() as text
 set pattern to patField's stringValue() as text
+set globalRule to "0"
+if (globalBox's integerValue() as integer) = 1 then
+    set globalRule to "1"
+end if
 set feedback to fb's stringValue() as text
 set sep to "%%OZM_SEP%%"
 
 if response = (current application's NSAlertFirstButtonReturn) as integer then
-    return "ALLOW:" & editedCmd & sep & pattern & sep & feedback
+    return "ALLOW:" & editedCmd & sep & pattern & sep & globalRule & sep & feedback
 else
-    return "DENY:" & editedCmd & sep & pattern & sep & feedback
+    return "DENY:" & editedCmd & sep & pattern & sep & globalRule & sep & feedback
 end if
 '''
 
@@ -469,11 +483,25 @@ def _parse_cmd_result(result: subprocess.CompletedProcess) -> ApprovalResult:
     for prefix, approved in [("ALLOW:", True), ("DENY:", False)]:
         if output.startswith(prefix):
             rest = output[len(prefix):]
-            parts = rest.split("%%OZM_SEP%%", 2)
+            parts = rest.split("%%OZM_SEP%%", 3)
             cmd = parts[0].replace("\n", " ").strip() or None
             pattern = parts[1].strip() if len(parts) > 1 and parts[1].strip() else None
-            feedback = parts[2].strip() if len(parts) > 2 and parts[2].strip() else None
-            return ApprovalResult(approved=approved, feedback=feedback, command=cmd, allow_pattern=pattern)
+            apply_globally = False
+            if len(parts) > 3:
+                apply_globally = parts[2].strip() == "1"
+                feedback = parts[3].strip() if parts[3].strip() else None
+            else:
+                feedback = parts[2].strip() if len(parts) > 2 and parts[2].strip() else None
+            allow_pattern = pattern if approved else None
+            block_pattern = pattern if approved is False else None
+            return ApprovalResult(
+                approved=approved,
+                feedback=feedback,
+                command=cmd,
+                allow_pattern=allow_pattern,
+                block_pattern=block_pattern,
+                apply_globally=apply_globally,
+            )
     return ApprovalResult(approved=None)
 
 

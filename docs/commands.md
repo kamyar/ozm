@@ -86,7 +86,7 @@ $ ozm cmd --agent-name "Run script" --agent-description "Try to execute a Python
 ozm: use 'ozm run --agent-name "Run script" --agent-description "Try to execute a Python script." myscript.py' instead — make sure the script has a shebang (#!/usr/bin/env python3)
 ```
 
-**Editable commands:** The macOS approval dialog lets you edit the command before running it. You can also enter an allowlist pattern (e.g. `curl https://api.example.com/*`) that gets saved to `.ozm.yaml` for future use.
+**Editable commands:** The macOS approval dialog lets you edit the command before running it. You can also enter a rule pattern (e.g. `curl https://api.example.com/*`). If you click Allow, the pattern is saved as an allowlist rule. If you click Deny, the pattern is saved as a blocklist rule. Check **Apply globally** to save the rule in `~/.ozm/config.yaml`; otherwise it is saved to the trusted project config. If **Apply globally** is checked and the rule field is blank, ozm saves the exact command as the global rule.
 
 **Agent metadata:** `--agent-name` is the short work name shown in the dialog. `--agent-description` must be exactly one line describing what the agent is trying to do. Missing, empty, multiline, or overlong metadata is rejected before execution, with an instruction for the agent to write the requirement to memory before retrying.
 
@@ -94,8 +94,8 @@ ozm: use 'ozm run --agent-name "Run script" --agent-description "Try to execute 
 
 **Approval order:**
 
-1. Blocked by `.ozm.yaml` `blocked_commands`? Deny immediately.
-2. Matches `.ozm.yaml` `allowed_commands`? Run immediately.
+1. Blocked by global or project `blocked_commands`? Deny immediately.
+2. Matches global or project `allowed_commands`? Run immediately.
 3. Hash matches a previous approval? Run immediately.
 4. Otherwise, show approval dialog.
 
@@ -115,7 +115,8 @@ flowchart TD
     H -->|Yes| G
     H -->|No| I[Show approval dialog]
     I -->|Allow| J[Store hash, execute]
-    I -->|Allow + pattern| K[Save pattern to .ozm.yaml, execute]
+    I -->|Allow + pattern| K[Save allow rule, execute]
+    I -->|Deny + pattern| M[Save block rule, exit]
     I -->|Deny| L[Exit with feedback]
 ```
 
@@ -318,7 +319,7 @@ All checks passed.
 
 ## ozm trust
 
-Activate the `.ozm.yaml` from the current project. This copies the in-repo config into `~/.ozm/projects/` where ozm actually reads it at runtime. The in-repo file is never read directly — this is a security boundary.
+Activate the `.ozm.yaml` from the current project. This copies the in-repo config into `~/.ozm/projects/` where ozm actually reads it at runtime. The in-repo file is never read directly — this is a security boundary. Global command rules live separately in `~/.ozm/config.yaml`.
 
 ```
 ozm trust
