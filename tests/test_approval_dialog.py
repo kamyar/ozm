@@ -1,9 +1,11 @@
 import os
 import stat
+import subprocess
 import unittest
 from unittest.mock import patch
 
 from ozm import approve as approve_mod
+from ozm.agent import AgentMetadata
 
 
 class ApprovalTemporaryFileTests(unittest.TestCase):
@@ -23,6 +25,68 @@ class ApprovalTemporaryFileTests(unittest.TestCase):
         self.assertEqual(stat.S_IMODE(os.stat(path).st_mode), 0o600)
         with open(path) as f:
             self.assertEqual(f.read(), content)
+
+    def test_secure_tmpfile_removes_private_file_when_write_fails(self):
+        original_fdopen = os.fdopen
+        original_mkstemp = approve_mod.tempfile.mkstemp
+        created_path = None
+
+        def fake_mkstemp(*args, **kwargs):
+            nonlocal created_path
+            fd, path = original_mkstemp(*args, **kwargs)
+            created_path = path
+            self.addCleanup(lambda: os.path.exists(path) and os.unlink(path))
+            return fd, path
+
+        def fake_fdopen(fd, *args, **kwargs):
+            real_file = original_fdopen(fd, *args, **kwargs)
+
+            class FailingFile:
+                def __enter__(self):
+                    real_file.__enter__()
+                    return self
+
+                def __exit__(self, exc_type, exc, tb):
+                    return real_file.__exit__(exc_type, exc, tb)
+
+                def write(self, content):
+                    raise OSError("disk full")
+
+            return FailingFile()
+
+        with patch.object(approve_mod.tempfile, "mkstemp", side_effect=fake_mkstemp), \
+            patch.object(approve_mod.os, "fdopen", side_effect=fake_fdopen):
+            with self.assertRaises(OSError):
+                approve_mod._secure_tmpfile(".review", "content")
+
+        self.assertIsNotNone(created_path)
+        self.assertFalse(os.path.exists(created_path))
+
+    def test_approve_cmd_macos_removes_generated_applescript_after_run(self):
+        captured_path = None
+
+        def fake_run(args, **kwargs):
+            nonlocal captured_path
+            captured_path = args[1]
+            self.assertTrue(os.path.exists(captured_path))
+            with open(captured_path) as f:
+                script = f.read()
+            self.assertIn("echo hello", script)
+            return subprocess.CompletedProcess(
+                args=args,
+                returncode=0,
+                stdout="DENY:echo hello%%OZM_SEP%%%%OZM_SEP%%0%%OZM_SEP%%not now",
+                stderr="",
+            )
+
+        agent = AgentMetadata("Approval cleanup", "Check generated dialog cleanup.")
+        with patch.object(approve_mod.subprocess, "run", side_effect=fake_run):
+            result = approve_mod._approve_cmd_macos("echo hello", agent)
+
+        self.assertFalse(result.approved)
+        self.assertEqual(result.feedback, "not now")
+        self.assertIsNotNone(captured_path)
+        self.assertFalse(os.path.exists(captured_path))
 
 
 if __name__ == "__main__":
