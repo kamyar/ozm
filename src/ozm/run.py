@@ -8,20 +8,18 @@ import subprocess
 import sys
 
 import click
-import yaml
-
 from ozm.agent import extract_agent_metadata
 from ozm.approve import request_approval
 from ozm.audit import log as audit_log
 from ozm.config import project_key
+from ozm.storage import load_yaml_no_follow, refuse_symlink, save_yaml_atomic_no_follow
 
 OZM_DIR = os.path.expanduser("~/.ozm")
 HASH_FILE = os.path.join(OZM_DIR, "hashes.yaml")
 
 
 def _refuse_symlink(path: str, label: str) -> None:
-    if os.path.islink(path):
-        raise RuntimeError(f"refusing to use symlinked {label}: {path}")
+    refuse_symlink(path, label)
 
 
 def compute_hash(path: str) -> str:
@@ -36,19 +34,24 @@ def resolve_path(path: str) -> str:
 def load_hashes() -> dict[str, str]:
     _refuse_symlink(OZM_DIR, "approval cache directory")
     _refuse_symlink(HASH_FILE, "approval cache file")
-    if os.path.exists(HASH_FILE):
-        with open(HASH_FILE) as f:
-            data = yaml.safe_load(f)
-            return data if data else {}
-    return {}
+    return load_yaml_no_follow(
+        HASH_FILE,
+        directory=OZM_DIR,
+        directory_label="approval cache directory",
+        file_label="approval cache file",
+    )
 
 
 def save_hashes(hashes: dict[str, str]) -> None:
     _refuse_symlink(OZM_DIR, "approval cache directory")
-    os.makedirs(OZM_DIR, exist_ok=True)
     _refuse_symlink(HASH_FILE, "approval cache file")
-    with open(HASH_FILE, "w") as f:
-        yaml.dump(hashes, f, default_flow_style=False, sort_keys=True)
+    save_yaml_atomic_no_follow(
+        HASH_FILE,
+        hashes,
+        directory=OZM_DIR,
+        directory_label="approval cache directory",
+        sort_keys=True,
+    )
 
 
 def show_file(path: str) -> None:

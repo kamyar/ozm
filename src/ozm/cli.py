@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 
 import os
-import shutil
 import subprocess
 from importlib.metadata import version as pkg_version
 
@@ -47,18 +46,35 @@ def version_cmd() -> None:
 @click.command("trust")
 def trust_cmd() -> None:
     """Snapshot the in-repo .ozm.yaml into ~/.ozm/projects/ (user-owned)."""
-    from ozm.config import find_project_root, _project_config_path, PROJECTS_DIR
+    from ozm.config import OZM_DIR, PROJECTS_DIR, _project_config_path, find_project_root
+    from ozm.storage import refuse_symlink, save_bytes_atomic_no_follow
+
     root = find_project_root()
     repo_config = os.path.join(root, ".ozm.yaml")
     if not os.path.isfile(repo_config):
         raise click.ClickException(f"No .ozm.yaml found in {root}")
     dest = _project_config_path()
-    if os.path.islink(PROJECTS_DIR):
-        raise click.ClickException(f"refusing to use symlinked config directory: {PROJECTS_DIR}")
-    os.makedirs(PROJECTS_DIR, exist_ok=True)
-    if os.path.islink(dest):
-        raise click.ClickException(f"refusing to write through symlink: {dest}")
-    shutil.copy2(repo_config, dest)
+    try:
+        refuse_symlink(OZM_DIR, "config directory")
+        refuse_symlink(PROJECTS_DIR, "config directory")
+        refuse_symlink(dest, "config file")
+    except RuntimeError as exc:
+        if dest in str(exc):
+            raise click.ClickException(f"refusing to write through symlink: {dest}") from exc
+        raise click.ClickException(str(exc)) from exc
+    with open(repo_config, "rb") as f:
+        content = f.read()
+    try:
+        save_bytes_atomic_no_follow(
+            dest,
+            content,
+            directory=PROJECTS_DIR,
+            directory_label="config directory",
+            parent_directory=OZM_DIR,
+            parent_label="config directory",
+        )
+    except RuntimeError as exc:
+        raise click.ClickException(str(exc)) from exc
     click.echo(f"ozm: copied {repo_config} -> {dest}")
 
 
