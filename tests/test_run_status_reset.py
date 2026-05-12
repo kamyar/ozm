@@ -2,11 +2,13 @@ import os
 import subprocess
 import unittest
 from contextlib import contextmanager
-from unittest.mock import patch
+from unittest.mock import ANY, patch
 
 from click.testing import CliRunner
 
+from ozm import cmd as cmd_mod
 from ozm import run as run_mod
+from ozm.approve import ApprovalResult
 
 
 META = [
@@ -159,6 +161,206 @@ class RunStatusResetTests(unittest.TestCase):
         self.assertEqual(result.exit_code, 0)
         ensure_executable.assert_called_once()
         run.assert_called_once_with([script, "--flag"])
+
+
+class HashStorePersistenceTests(unittest.TestCase):
+    def test_save_hashes_refuses_symlinked_ozm_dir(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            ozm_dir = os.path.abspath("ozm-link")
+            hash_file = os.path.join(ozm_dir, "hashes.yaml")
+            outside = os.path.abspath("outside")
+            os.makedirs(outside)
+            os.symlink(outside, ozm_dir)
+
+            with patch.object(run_mod, "OZM_DIR", ozm_dir), \
+                patch.object(run_mod, "HASH_FILE", hash_file):
+                with self.assertRaises(RuntimeError):
+                    run_mod.save_hashes({"project\0cmd:pytest": "hash"})
+
+            self.assertEqual(os.listdir(outside), [])
+
+    def test_save_hashes_refuses_symlinked_hash_file(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            ozm_dir = os.path.abspath("ozm")
+            hash_file = os.path.join(ozm_dir, "hashes.yaml")
+            outside = os.path.abspath("outside")
+            victim = os.path.join(outside, "victim.yaml")
+            os.makedirs(ozm_dir)
+            os.makedirs(outside)
+            with open(victim, "w") as f:
+                f.write("safe: value\n")
+            os.symlink(victim, hash_file)
+
+            with patch.object(run_mod, "OZM_DIR", ozm_dir), \
+                patch.object(run_mod, "HASH_FILE", hash_file):
+                with self.assertRaises(RuntimeError):
+                    run_mod.save_hashes({"project\0cmd:pytest": "hash"})
+
+            with open(victim) as f:
+                self.assertEqual(f.read(), "safe: value\n")
+
+    def test_load_hashes_refuses_symlinked_hash_file(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            ozm_dir = os.path.abspath("ozm")
+            hash_file = os.path.join(ozm_dir, "hashes.yaml")
+            outside = os.path.abspath("outside")
+            victim = os.path.join(outside, "victim.yaml")
+            os.makedirs(ozm_dir)
+            os.makedirs(outside)
+            with open(victim, "w") as f:
+                f.write("project\\0cmd:pytest: attacker-hash\n")
+            os.symlink(victim, hash_file)
+
+            with patch.object(run_mod, "OZM_DIR", ozm_dir), \
+                patch.object(run_mod, "HASH_FILE", hash_file):
+                with self.assertRaises(RuntimeError):
+                    run_mod.load_hashes()
+
+
+class ApprovalCacheBehaviorTests(unittest.TestCase):
+    def write_script(self, path: str, body: str = "echo hi") -> str:
+        with open(path, "w") as f:
+            f.write(f"#!/usr/bin/env sh\n{body}\n")
+        return os.path.abspath(path)
+
+    def symlinked_hash_file(self) -> tuple[str, str, str]:
+        ozm_dir = os.path.abspath("ozm")
+        hash_file = os.path.join(ozm_dir, "hashes.yaml")
+        outside = os.path.abspath("outside")
+        victim = os.path.join(outside, "victim.yaml")
+        os.makedirs(ozm_dir)
+        os.makedirs(outside)
+        os.symlink(victim, hash_file)
+        return ozm_dir, hash_file, victim
+
+    def test_run_refuses_symlinked_cache_without_executing_cached_script(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            os.mkdir(".git")
+            script = self.write_script("script.sh")
+            ozm_dir, hash_file, victim = self.symlinked_hash_file()
+            with open(victim, "w") as f:
+                f.write(f"{run_mod.project_key(script)}: {run_mod.compute_hash(script)}\n")
+
+            with patch.object(run_mod, "OZM_DIR", ozm_dir), \
+                patch.object(run_mod, "HASH_FILE", hash_file), \
+                patch.object(run_mod, "request_approval") as request_approval, \
+                patch.object(run_mod, "ensure_executable") as ensure_executable, \
+                patch.object(run_mod.subprocess, "run") as run, \
+                patch.object(run_mod, "audit_log") as audit_log:
+                result = runner.invoke(run_mod.run_cmd, [*META, "script.sh"])
+
+        self.assertNotEqual(result.exit_code, 0)
+        self.assertIn("approval cache", result.output)
+        self.assertIn("script was NOT executed", result.output)
+        self.assertNotIn("allowed (cached)", result.output)
+        request_approval.assert_not_called()
+        ensure_executable.assert_not_called()
+        run.assert_not_called()
+        audit_log.assert_called_with("error", "run", script, ANY)
+
+    def test_approved_run_cache_save_failure_does_not_execute_script(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            os.mkdir(".git")
+            script = self.write_script("script.sh")
+            ozm_dir = os.path.abspath("ozm")
+            hash_file = os.path.join(ozm_dir, "hashes.yaml")
+            outside = os.path.abspath("outside")
+            victim = os.path.join(outside, "victim.yaml")
+            os.makedirs(ozm_dir)
+            os.makedirs(outside)
+
+            def fake_approval(*_args, **_kwargs):
+                with open(victim, "w") as f:
+                    f.write("existing: value\n")
+                os.symlink(victim, hash_file)
+                return ApprovalResult(approved=True)
+
+            with patch.object(run_mod, "OZM_DIR", ozm_dir), \
+                patch.object(run_mod, "HASH_FILE", hash_file), \
+                patch.object(run_mod, "request_approval", side_effect=fake_approval), \
+                patch.object(run_mod, "ensure_executable") as ensure_executable, \
+                patch.object(run_mod.subprocess, "run") as run, \
+                patch.object(run_mod, "audit_log") as audit_log:
+                result = runner.invoke(run_mod.run_cmd, [*META, "script.sh"])
+
+            with open(victim) as f:
+                self.assertEqual(f.read(), "existing: value\n")
+
+        self.assertNotEqual(result.exit_code, 0)
+        self.assertIn("could not save approval cache", result.output)
+        self.assertIn("script was NOT executed", result.output)
+        self.assertNotIn("approved script.sh", result.output)
+        ensure_executable.assert_not_called()
+        run.assert_not_called()
+        audit_log.assert_called_with("error", "run", script, ANY)
+
+    def test_cmd_refuses_symlinked_cache_without_executing_cached_command(self):
+        runner = CliRunner()
+        command = "echo ok"
+        with runner.isolated_filesystem():
+            os.mkdir(".git")
+            ozm_dir, hash_file, victim = self.symlinked_hash_file()
+            with open(victim, "w") as f:
+                f.write(f"{cmd_mod.project_key(cmd_mod.CMD_PREFIX + command)}: {cmd_mod._cmd_hash(command)}\n")
+
+            with patch.object(run_mod, "OZM_DIR", ozm_dir), \
+                patch.object(run_mod, "HASH_FILE", hash_file), \
+                patch.object(cmd_mod, "is_command_blocked", return_value=None), \
+                patch.object(cmd_mod, "is_command_allowed", return_value=False), \
+                patch.object(cmd_mod, "request_cmd_approval") as request_cmd_approval, \
+                patch.object(cmd_mod, "_run_command") as run_command, \
+                patch.object(cmd_mod, "audit_log") as audit_log:
+                result = runner.invoke(cmd_mod.cmd_cmd, [*META, "echo", "ok"])
+
+        self.assertNotEqual(result.exit_code, 0)
+        self.assertIn("approval cache", result.output)
+        self.assertIn("command was NOT executed", result.output)
+        self.assertNotIn("allowed (cached)", result.output)
+        request_cmd_approval.assert_not_called()
+        run_command.assert_not_called()
+        audit_log.assert_called_with("error", "cmd", command, ANY)
+
+    def test_approved_cmd_cache_save_failure_does_not_execute_command(self):
+        runner = CliRunner()
+        command = "echo ok"
+        with runner.isolated_filesystem():
+            os.mkdir(".git")
+            ozm_dir = os.path.abspath("ozm")
+            hash_file = os.path.join(ozm_dir, "hashes.yaml")
+            outside = os.path.abspath("outside")
+            victim = os.path.join(outside, "victim.yaml")
+            os.makedirs(ozm_dir)
+            os.makedirs(outside)
+
+            def fake_approval(*_args, **_kwargs):
+                with open(victim, "w") as f:
+                    f.write("existing: value\n")
+                os.symlink(victim, hash_file)
+                return ApprovalResult(approved=True, command=command)
+
+            with patch.object(run_mod, "OZM_DIR", ozm_dir), \
+                patch.object(run_mod, "HASH_FILE", hash_file), \
+                patch.object(cmd_mod, "is_command_blocked", return_value=None), \
+                patch.object(cmd_mod, "is_command_allowed", return_value=False), \
+                patch.object(cmd_mod, "request_cmd_approval", side_effect=fake_approval), \
+                patch.object(cmd_mod, "_run_command") as run_command, \
+                patch.object(cmd_mod, "audit_log") as audit_log:
+                result = runner.invoke(cmd_mod.cmd_cmd, [*META, "echo", "ok"])
+
+            with open(victim) as f:
+                self.assertEqual(f.read(), "existing: value\n")
+
+        self.assertNotEqual(result.exit_code, 0)
+        self.assertIn("could not save approval cache", result.output)
+        self.assertIn("command was NOT executed", result.output)
+        self.assertNotIn("approved cmd", result.output)
+        run_command.assert_not_called()
+        audit_log.assert_called_with("error", "cmd", command, ANY)
 
 
 if __name__ == "__main__":

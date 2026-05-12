@@ -157,7 +157,13 @@ def cmd_cmd(command_and_args: tuple[str, ...]) -> None:
 
     key = project_key(CMD_PREFIX + command)
     current_hash = _cmd_hash(command)
-    hashes = load_hashes()
+    try:
+        hashes = load_hashes()
+    except (OSError, RuntimeError) as exc:
+        audit_log("error", "cmd", command, str(exc))
+        raise click.ClickException(
+            f"approval cache error: {exc}. The command was NOT executed."
+        ) from exc
 
     if hashes.get(key) == current_hash:
         audit_log("cached", "cmd", command)
@@ -212,7 +218,13 @@ def cmd_cmd(command_and_args: tuple[str, ...]) -> None:
         run_key = project_key(CMD_PREFIX + run_command)
         run_hash = _cmd_hash(run_command)
         hashes[run_key] = run_hash
-        save_hashes(hashes)
+        try:
+            save_hashes(hashes)
+        except (OSError, RuntimeError) as exc:
+            audit_log("error", "cmd", run_command, str(exc))
+            raise click.ClickException(
+                f"could not save approval cache: {exc}. The command was NOT executed."
+            ) from exc
         audit_log("clicked", "cmd", run_command, approval.feedback)
         if approval.feedback:
             click.echo(f"ozm: approved cmd — {approval.feedback}", err=True)
