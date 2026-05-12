@@ -1,4 +1,5 @@
 import os
+import shlex
 import sys
 import unittest
 from unittest.mock import ANY, patch
@@ -589,21 +590,22 @@ class CommandConfigPersistenceFailureTests(unittest.TestCase):
                     apply_globally=True,
                 )
 
+            command_args = [
+                sys.executable,
+                "-c",
+                "from pathlib import Path; Path('executed.txt').write_text('ran')",
+            ]
             with patch.object(config_mod, "OZM_DIR", ozm_dir), \
                 patch.object(config_mod, "PROJECTS_DIR", os.path.join(ozm_dir, "projects")), \
                 patch.object(config_mod, "GLOBAL_CONFIG", global_config), \
                 patch.object(run_mod, "OZM_DIR", ozm_dir), \
                 patch.object(run_mod, "HASH_FILE", hash_file), \
                 patch.object(cmd_mod, "request_cmd_approval", side_effect=fake_approval), \
+                patch.object(cmd_mod, "_run_command") as run_command, \
                 patch.object(cmd_mod, "audit_log") as audit_log:
                 result = runner.invoke(
                     cmd_mod.cmd_cmd,
-                    [
-                        *META,
-                        sys.executable,
-                        "-c",
-                        "from pathlib import Path; Path('executed.txt').write_text('ran')",
-                    ],
+                    [*META, *command_args],
                 )
 
             self.assertFalse(os.path.exists("executed.txt"))
@@ -615,7 +617,8 @@ class CommandConfigPersistenceFailureTests(unittest.TestCase):
         self.assertIn("could not save global allowlist pattern", result.output)
         self.assertIn("command was NOT executed", result.output)
         self.assertNotIn("approved cmd", result.output)
-        audit_log.assert_called_with("error", "cmd", ANY, ANY)
+        run_command.assert_not_called()
+        audit_log.assert_called_with("error", "cmd", shlex.join(command_args), ANY)
 
     def test_block_rule_save_failure_does_not_claim_rule_was_added(self):
         runner = CliRunner()
@@ -649,11 +652,21 @@ class CommandConfigPersistenceFailureTests(unittest.TestCase):
                         apply_globally=False,
                     )
 
+                command_args = [
+                    sys.executable,
+                    "-c",
+                    "from pathlib import Path; Path('executed.txt').write_text('ran')",
+                ]
                 with patch.object(cmd_mod, "request_cmd_approval", side_effect=fake_approval), \
+                    patch.object(cmd_mod, "_run_command") as run_command, \
                     patch.object(cmd_mod, "audit_log") as audit_log:
-                    result = runner.invoke(cmd_mod.cmd_cmd, [*META, "curl", "example.com"])
+                    result = runner.invoke(
+                        cmd_mod.cmd_cmd,
+                        [*META, *command_args],
+                    )
 
             self.assertFalse(os.path.exists(hash_file))
+            self.assertFalse(os.path.exists("executed.txt"))
             with open(victim) as f:
                 self.assertEqual(f.read(), "blocked_commands: []\n")
 
@@ -661,7 +674,8 @@ class CommandConfigPersistenceFailureTests(unittest.TestCase):
         self.assertIn("could not save project blocklist pattern", result.output)
         self.assertIn("command was NOT executed", result.output)
         self.assertNotIn("added project blocklist pattern", result.output)
-        audit_log.assert_called_with("error", "cmd", "curl example.com", ANY)
+        run_command.assert_not_called()
+        audit_log.assert_called_with("error", "cmd", shlex.join(command_args), ANY)
 
 
 if __name__ == "__main__":
