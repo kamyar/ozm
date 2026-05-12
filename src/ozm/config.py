@@ -159,6 +159,7 @@ def _global_config_path() -> str:
 
 
 def _load_yaml(path: str) -> dict:
+    _refuse_symlink(path, "config file")
     if not os.path.exists(path):
         return {}
     with open(path) as f:
@@ -173,11 +174,14 @@ def _refuse_symlink(path: str, label: str) -> None:
 
 def load_project_config() -> dict:
     """Load config from ~/.ozm/projects/. Never reads in-repo files."""
+    _refuse_symlink(OZM_DIR, "config directory")
+    _refuse_symlink(PROJECTS_DIR, "project config directory")
     return _load_yaml(_project_config_path())
 
 
 def load_global_config() -> dict:
     """Load config from ~/.ozm/config.yaml."""
+    _refuse_symlink(OZM_DIR, "config directory")
     return _load_yaml(_global_config_path())
 
 
