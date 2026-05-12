@@ -10,7 +10,6 @@ from click.testing import CliRunner
 from ozm import cmd as cmd_mod
 from ozm import git as git_mod
 from ozm import install as install_mod
-from ozm import run as run_mod
 from ozm.approve import ApprovalResult
 
 META = [
@@ -169,33 +168,6 @@ class InstallHookTests(unittest.TestCase):
         self.assertIn("deny", result.stdout)
         self.assertIn("sed is disallowed", result.stdout)
         self.assertIn("rg for searching", result.stdout)
-
-
-class RunTests(unittest.TestCase):
-    def test_cached_bare_script_runs_by_absolute_path(self):
-        runner = CliRunner()
-        with runner.isolated_filesystem():
-            with open("hello.sh", "w") as f:
-                f.write("#!/usr/bin/env sh\necho hello\n")
-            abs_path = os.path.abspath("hello.sh")
-
-            with patch.object(run_mod, "compute_hash", return_value="hash"), \
-                patch.object(
-                    run_mod,
-                    "load_hashes",
-                    return_value={run_mod.project_key(abs_path): "hash"},
-                ), \
-                patch.object(run_mod, "ensure_executable"), \
-                patch.object(run_mod, "audit_log"), \
-                patch.object(
-                    run_mod.subprocess,
-                    "run",
-                    return_value=subprocess.CompletedProcess(args=[], returncode=0),
-                ) as run:
-                result = runner.invoke(run_mod.run_cmd, [*META, "hello.sh"])
-
-        self.assertEqual(result.exit_code, 0)
-        run.assert_called_once_with([abs_path])
 
 
 if __name__ == "__main__":

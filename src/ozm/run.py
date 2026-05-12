@@ -61,6 +61,17 @@ def ensure_executable(path: str) -> None:
         os.chmod(path, st.st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
 
+def _display_key_target(root: str, target: str) -> str:
+    if not os.path.isabs(target):
+        return target
+    try:
+        if os.path.commonpath([root, target]) == root:
+            return os.path.relpath(target, root)
+    except ValueError:
+        pass
+    return target
+
+
 @click.command(
     "run",
     context_settings={"ignore_unknown_options": True, "allow_extra_args": True},
@@ -77,6 +88,8 @@ def run_cmd(items: tuple[str, ...]) -> None:
 
     if not os.path.exists(script):
         raise click.ClickException(f"{script}: not found")
+    if not os.path.isfile(script):
+        raise click.ClickException(f"{script}: not a file")
 
     abs_path = resolve_path(script)
     key = project_key(abs_path)
@@ -143,11 +156,12 @@ def status_cmd() -> None:
         click.echo("No tracked entries.")
         return
     for key, stored_hash in sorted(entries.items()):
-        display = key[len(prefix):]
-        if "cmd:" in display:
+        target = key[len(prefix):]
+        display = _display_key_target(root, target)
+        if target.startswith("cmd:"):
             label = "ok"
-        elif os.path.exists(display):
-            current = compute_hash(display)
+        elif os.path.exists(target):
+            current = compute_hash(target)
             label = "ok" if current == stored_hash else "CHANGED"
         else:
             label = "MISSING"
@@ -165,6 +179,8 @@ def reset_cmd(script: str | None, reset_all: bool) -> None:
     prefix = root + "\0"
 
     if reset_all:
+        if script:
+            raise click.ClickException("Use either a script name or --all, not both.")
         hashes = load_hashes()
         hashes = {k: v for k, v in hashes.items() if not k.startswith(prefix)}
         save_hashes(hashes)
