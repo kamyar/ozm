@@ -19,6 +19,11 @@ OZM_DIR = os.path.expanduser("~/.ozm")
 HASH_FILE = os.path.join(OZM_DIR, "hashes.yaml")
 
 
+def _refuse_symlink(path: str, label: str) -> None:
+    if os.path.islink(path):
+        raise RuntimeError(f"refusing to use symlinked {label}: {path}")
+
+
 def compute_hash(path: str) -> str:
     with open(path, "rb") as f:
         return hashlib.sha256(f.read()).hexdigest()
@@ -29,6 +34,8 @@ def resolve_path(path: str) -> str:
 
 
 def load_hashes() -> dict[str, str]:
+    _refuse_symlink(OZM_DIR, "approval cache directory")
+    _refuse_symlink(HASH_FILE, "approval cache file")
     if os.path.exists(HASH_FILE):
         with open(HASH_FILE) as f:
             data = yaml.safe_load(f)
@@ -37,7 +44,9 @@ def load_hashes() -> dict[str, str]:
 
 
 def save_hashes(hashes: dict[str, str]) -> None:
+    _refuse_symlink(OZM_DIR, "approval cache directory")
     os.makedirs(OZM_DIR, exist_ok=True)
+    _refuse_symlink(HASH_FILE, "approval cache file")
     with open(HASH_FILE, "w") as f:
         yaml.dump(hashes, f, default_flow_style=False, sort_keys=True)
 
@@ -94,7 +103,13 @@ def run_cmd(items: tuple[str, ...]) -> None:
     abs_path = resolve_path(script)
     key = project_key(abs_path)
     current_hash = compute_hash(script)
-    hashes = load_hashes()
+    try:
+        hashes = load_hashes()
+    except (OSError, RuntimeError) as exc:
+        audit_log("error", "run", abs_path, str(exc))
+        raise click.ClickException(
+            f"approval cache error: {exc}. The script was NOT executed."
+        ) from exc
     stored_hash = hashes.get(key)
 
     if stored_hash == current_hash:
@@ -110,7 +125,13 @@ def run_cmd(items: tuple[str, ...]) -> None:
 
     if approval.approved is True:
         hashes[key] = current_hash
-        save_hashes(hashes)
+        try:
+            save_hashes(hashes)
+        except (OSError, RuntimeError) as exc:
+            audit_log("error", "run", abs_path, str(exc))
+            raise click.ClickException(
+                f"could not save approval cache: {exc}. The script was NOT executed."
+            ) from exc
         audit_log("clicked", "run", abs_path, approval.feedback)
         if approval.feedback:
             click.echo(f"ozm: approved {script} — {approval.feedback}", err=True)
