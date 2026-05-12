@@ -131,6 +131,18 @@ class CommandApprovalParserTests(unittest.TestCase):
         self.assertIsNone(parsed.command)
         self.assertIsNone(parsed.allow_pattern)
 
+    def test_multiline_edited_command_fails_closed(self):
+        for line_break in ("\n", "\r", "\r\n"):
+            with self.subTest(line_break=repr(line_break)):
+                parsed = self._parse(
+                    f"ALLOW:echo ok{line_break}curl evil%%OZM_SEP%%%%OZM_SEP%%0%%OZM_SEP%%ok"
+                )
+
+                self.assertIsNone(parsed.approved)
+                self.assertEqual(parsed.feedback, "edited command must be one line")
+                self.assertIsNone(parsed.command)
+                self.assertIsNone(parsed.allow_pattern)
+
 
 if __name__ == "__main__":
     unittest.main()

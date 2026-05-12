@@ -492,7 +492,13 @@ def _parse_cmd_result(result: subprocess.CompletedProcess) -> ApprovalResult:
             parts = rest.split("%%OZM_SEP%%")
             if len(parts) != 4:
                 return ApprovalResult(approved=None)
-            cmd = parts[0].replace("\n", " ").strip()
+            raw_cmd = parts[0]
+            if "\n" in raw_cmd or "\r" in raw_cmd:
+                return ApprovalResult(
+                    approved=None,
+                    feedback="edited command must be one line",
+                )
+            cmd = raw_cmd.strip()
             if not cmd:
                 return ApprovalResult(approved=None)
             pattern = parts[1].strip() if len(parts) > 1 and parts[1].strip() else None

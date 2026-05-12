@@ -246,6 +246,39 @@ class TestH2EditedCommandRecheck(unittest.TestCase):
         save_hashes.assert_not_called()
         mock_sub.run.assert_not_called()
 
+    def test_multiline_dialog_command_fails_closed_before_execution(self):
+        dialog_result = subprocess.CompletedProcess(
+            args=["osascript"],
+            returncode=0,
+            stdout="ALLOW:echo ok\ncurl evil%%OZM_SEP%%%%OZM_SEP%%0%%OZM_SEP%%ok",
+            stderr="",
+        )
+        approval = _parse_cmd_result(dialog_result)
+        completed = subprocess.CompletedProcess(args=["echo", "ok", "curl", "evil"], returncode=0)
+
+        with patch.object(cmd_mod, "is_command_blocked", return_value=None), \
+             patch.object(cmd_mod, "is_command_allowed", return_value=False), \
+             patch.object(cmd_mod, "load_hashes", return_value={}), \
+             patch.object(cmd_mod, "save_hashes") as save_hashes, \
+             patch.object(
+                 cmd_mod,
+                 "request_cmd_approval",
+                 return_value=approval,
+             ), \
+             patch.object(cmd_mod, "subprocess") as mock_sub, \
+             patch.object(cmd_mod, "audit_log"):
+            mock_sub.run.return_value = completed
+            result = CliRunner().invoke(cmd_mod.cmd_cmd, [*META, "echo", "ok"])
+
+        self.assertIsNone(approval.approved)
+        self.assertEqual(approval.feedback, "edited command must be one line")
+        self.assertNotEqual(result.exit_code, 0)
+        self.assertIn("dialog error: edited command must be one line", result.output)
+        self.assertIn("BLOCKED", result.output)
+        self.assertIn("command was NOT executed", result.output)
+        save_hashes.assert_not_called()
+        mock_sub.run.assert_not_called()
+
     def test_edited_safe_command_runs_as_argv(self):
         completed = subprocess.CompletedProcess(
             args=["rg", "-n", "isolated_filesystem|HASH_FILE", "tests"],
