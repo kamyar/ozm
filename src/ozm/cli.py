@@ -53,7 +53,11 @@ def trust_cmd() -> None:
     if not os.path.isfile(repo_config):
         raise click.ClickException(f"No .ozm.yaml found in {root}")
     dest = _project_config_path()
+    if os.path.islink(PROJECTS_DIR):
+        raise click.ClickException(f"refusing to use symlinked config directory: {PROJECTS_DIR}")
     os.makedirs(PROJECTS_DIR, exist_ok=True)
+    if os.path.islink(dest):
+        raise click.ClickException(f"refusing to write through symlink: {dest}")
     shutil.copy2(repo_config, dest)
     click.echo(f"ozm: copied {repo_config} -> {dest}")
 

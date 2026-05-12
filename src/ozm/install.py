@@ -498,6 +498,9 @@ def install_cmd(project: bool) -> None:
     _configure_claude_code()
     _configure_codex()
     if project:
-        _write_file("CLAUDE.md", CLAUDE_MD)
-        _write_file("AGENTS.md", AGENTS_MD)
+        from ozm.config import find_project_root
+
+        root = find_project_root()
+        _write_file(os.path.join(root, "CLAUDE.md"), CLAUDE_MD)
+        _write_file(os.path.join(root, "AGENTS.md"), AGENTS_MD)
     click.echo("ozm: done")

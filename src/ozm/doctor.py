@@ -62,7 +62,10 @@ def _check_claude_settings() -> tuple[bool, str]:
 
 
 def _check_codex_project_docs() -> tuple[bool, str]:
-    agents_path = os.path.join(os.getcwd(), "AGENTS.md")
+    from ozm.config import find_project_root
+
+    root = find_project_root()
+    agents_path = os.path.join(root, "AGENTS.md")
     if not os.path.isfile(agents_path):
         return (
             False,
