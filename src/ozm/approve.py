@@ -483,7 +483,7 @@ def _parse_cmd_result(result: subprocess.CompletedProcess) -> ApprovalResult:
     if result.returncode != 0:
         if "user canceled" in result.stderr.lower():
             return ApprovalResult(approved=False)
-        return ApprovalResult(approved=None)
+        return ApprovalResult(approved=None, feedback=result.stderr.strip() or None)
 
     output = result.stdout.strip()
     for prefix, approved in [("ALLOW:", True), ("DENY:", False)]:

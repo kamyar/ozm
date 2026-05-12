@@ -99,6 +99,36 @@ class CommandApprovalParserTests(unittest.TestCase):
         )
         return approve_mod._parse_cmd_result(result)
 
+    def test_non_cancel_error_preserves_feedback(self):
+        result = subprocess.CompletedProcess(
+            args=["osascript"],
+            returncode=1,
+            stdout="",
+            stderr="execution error: dialog bridge failed",
+        )
+
+        parsed = approve_mod._parse_cmd_result(result)
+
+        self.assertIsNone(parsed.approved)
+        self.assertEqual(parsed.feedback, "execution error: dialog bridge failed")
+        self.assertIsNone(parsed.command)
+        self.assertIsNone(parsed.allow_pattern)
+        self.assertIsNone(parsed.block_pattern)
+        self.assertFalse(parsed.apply_globally)
+
+    def test_user_cancel_stays_denied_without_feedback(self):
+        result = subprocess.CompletedProcess(
+            args=["osascript"],
+            returncode=1,
+            stdout="",
+            stderr="execution error: User canceled.",
+        )
+
+        parsed = approve_mod._parse_cmd_result(result)
+
+        self.assertIs(parsed.approved, False)
+        self.assertIsNone(parsed.feedback)
+
     def test_empty_approved_command_fails_closed(self):
         parsed = self._parse("ALLOW:%%OZM_SEP%%pytest *%%OZM_SEP%%1%%OZM_SEP%%ok")
 

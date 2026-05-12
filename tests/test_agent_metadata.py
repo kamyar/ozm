@@ -73,14 +73,18 @@ class AgentMetadataTests(unittest.TestCase):
             return subprocess.CompletedProcess(
                 args=args,
                 returncode=0,
-                stdout="DENY:echo hello%%OZM_SEP%%%%OZM_SEP%%",
+                stdout="DENY:echo hello%%OZM_SEP%%%%OZM_SEP%%0%%OZM_SEP%%",
                 stderr="",
             )
 
         with patch.object(approve_mod.subprocess, "run", side_effect=fake_run):
             result = approve_mod._approve_cmd_macos("echo hello", agent)
 
-        self.assertFalse(result.approved)
+        self.assertIs(result.approved, False)
+        self.assertEqual(result.command, "echo hello")
+        self.assertIsNone(result.feedback)
+        self.assertIsNone(result.block_pattern)
+        self.assertFalse(result.apply_globally)
 
     def test_command_dialog_extracts_metadata_from_command_text(self):
         command = (
@@ -98,14 +102,15 @@ class AgentMetadataTests(unittest.TestCase):
             return subprocess.CompletedProcess(
                 args=args,
                 returncode=0,
-                stdout="DENY:rg ozm README.md%%OZM_SEP%%%%OZM_SEP%%",
+                stdout="DENY:rg ozm README.md%%OZM_SEP%%%%OZM_SEP%%0%%OZM_SEP%%",
                 stderr="",
             )
 
         with patch.object(approve_mod.subprocess, "run", side_effect=fake_run):
             result = approve_mod.request_cmd_approval(command)
 
-        self.assertFalse(result.approved)
+        self.assertIs(result.approved, False)
+        self.assertEqual(result.command, "rg ozm README.md")
 
 
 if __name__ == "__main__":
