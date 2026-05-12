@@ -131,7 +131,13 @@ def cmd_cmd(command_and_args: tuple[str, ...]) -> None:
         click.echo(f"ozm: {disallowed}", err=True)
         sys.exit(1)
 
-    blocked = is_command_blocked(command)
+    try:
+        blocked = is_command_blocked(command)
+    except (OSError, RuntimeError) as exc:
+        audit_log("error", "cmd", command, str(exc))
+        raise click.ClickException(
+            f"config error: {exc}. The command was NOT executed."
+        ) from exc
     if blocked:
         if not reason:
             audit_log("blocked", "cmd", command)
@@ -149,7 +155,14 @@ def cmd_cmd(command_and_args: tuple[str, ...]) -> None:
             click.echo("ozm: override denied", err=True)
             sys.exit(1)
 
-    if is_command_allowed(command):
+    try:
+        allowed = is_command_allowed(command)
+    except (OSError, RuntimeError) as exc:
+        audit_log("error", "cmd", command, str(exc))
+        raise click.ClickException(
+            f"config error: {exc}. The command was NOT executed."
+        ) from exc
+    if allowed:
         audit_log("config", "cmd", command)
         click.echo("ozm: allowed (config)", err=True)
         result = _run_command(args)
