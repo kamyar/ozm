@@ -97,6 +97,10 @@ def split_shell_parts(command):
         parts.append(part)
     return parts
 
+def is_env_assignment(token):
+    name, sep, _value = token.partition("=")
+    return bool(sep and name and re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", name))
+
 def first_word(part):
     try:
         words = shlex.split(part, posix=True)
@@ -104,7 +108,29 @@ def first_word(part):
         words = part.split()
     if not words:
         return ""
-    return os.path.basename(words[0])
+    index = 0
+    while index < len(words) and is_env_assignment(words[index]):
+        index += 1
+    if index < len(words) and os.path.basename(words[index]) == "env":
+        index += 1
+        while index < len(words):
+            token = words[index]
+            if token == "--":
+                index += 1
+                break
+            if is_env_assignment(token) or token in {"-i", "--ignore-environment"}:
+                index += 1
+                continue
+            if token in {"-u", "--unset"} and index + 1 < len(words):
+                index += 2
+                continue
+            if token.startswith("-u") or token.startswith("--unset="):
+                index += 1
+                continue
+            break
+    if index >= len(words):
+        return ""
+    return os.path.basename(words[index])
 
 def _flag_value(words, flag):
     for i, word in enumerate(words):
@@ -172,6 +198,8 @@ for raw_part in raw_parts:
         violation = validate_ozm_metadata(raw_part)
         if violation:
             deny(violation)
+        if has_top_level_redirection(raw_part):
+            deny("Top-level redirection around ozm commands is not allowed - put redirection inside a reviewed script or run without shell redirection.")
         continue
     if word in SAFE:
         if is_compound or has_top_level_redirection(raw_part):
