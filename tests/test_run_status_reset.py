@@ -8,6 +8,7 @@ from click.testing import CliRunner
 
 from ozm import cmd as cmd_mod
 from ozm import run as run_mod
+from ozm import storage as storage_mod
 from ozm.approve import ApprovalResult
 
 
@@ -201,6 +202,89 @@ class HashStorePersistenceTests(unittest.TestCase):
             with open(victim) as f:
                 self.assertEqual(f.read(), "safe: value\n")
 
+    def test_save_hashes_does_not_follow_hash_file_symlink_swap(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            ozm_dir = os.path.abspath("ozm")
+            hash_file = os.path.join(ozm_dir, "hashes.yaml")
+            outside = os.path.abspath("outside")
+            victim = os.path.join(outside, "victim.yaml")
+            os.makedirs(ozm_dir)
+            os.makedirs(outside)
+            with open(victim, "w") as f:
+                f.write("safe: value\n")
+
+            with patch.object(run_mod, "OZM_DIR", ozm_dir), \
+                patch.object(run_mod, "HASH_FILE", hash_file):
+                real_replace = storage_mod.os.replace
+                swapped = False
+
+                def swap_hash_file_before_replace(src, dst, *args, **kwargs):
+                    nonlocal swapped
+                    if not swapped:
+                        swapped = True
+                        os.symlink(victim, hash_file)
+                    return real_replace(src, dst, *args, **kwargs)
+
+                with patch.object(storage_mod.os, "replace", side_effect=swap_hash_file_before_replace):
+                    run_mod.save_hashes({"project\0cmd:pytest": "hash"})
+
+                self.assertEqual(run_mod.load_hashes(), {"project\0cmd:pytest": "hash"})
+
+            self.assertTrue(swapped)
+            with open(victim) as f:
+                self.assertEqual(f.read(), "safe: value\n")
+            self.assertFalse(os.path.islink(hash_file))
+
+    def test_save_hashes_does_not_follow_ozm_dir_symlink_swap(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            ozm_dir = os.path.abspath("ozm")
+            hash_file = os.path.join(ozm_dir, "hashes.yaml")
+            outside = os.path.abspath("outside")
+            original_ozm_dir = os.path.abspath("ozm-original")
+            os.makedirs(ozm_dir)
+            os.makedirs(outside)
+
+            with patch.object(run_mod, "OZM_DIR", ozm_dir), \
+                patch.object(run_mod, "HASH_FILE", hash_file):
+                real_open = storage_mod.os.open
+                swapped = False
+
+                def swap_ozm_dir_before_open(path, *args, **kwargs):
+                    nonlocal swapped
+                    if path == ozm_dir and not swapped:
+                        swapped = True
+                        os.rename(ozm_dir, original_ozm_dir)
+                        os.symlink(outside, ozm_dir)
+                    return real_open(path, *args, **kwargs)
+
+                with patch.object(storage_mod.os, "open", side_effect=swap_ozm_dir_before_open):
+                    with self.assertRaises(RuntimeError):
+                        run_mod.save_hashes({"project\0cmd:pytest": "hash"})
+
+            self.assertTrue(swapped)
+            self.assertEqual(os.listdir(outside), [])
+
+    def test_save_hashes_preserves_existing_file_when_yaml_write_fails(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            ozm_dir = os.path.abspath("ozm")
+            hash_file = os.path.join(ozm_dir, "hashes.yaml")
+            original = "existing: value\n"
+            os.makedirs(ozm_dir)
+            with open(hash_file, "w") as f:
+                f.write(original)
+
+            with patch.object(run_mod, "OZM_DIR", ozm_dir), \
+                patch.object(run_mod, "HASH_FILE", hash_file), \
+                patch.object(storage_mod.yaml, "dump", side_effect=RuntimeError("boom")):
+                with self.assertRaises(RuntimeError):
+                    run_mod.save_hashes({"project\0cmd:pytest": "hash"})
+
+            with open(hash_file) as f:
+                self.assertEqual(f.read(), original)
+
     def test_load_hashes_refuses_symlinked_hash_file(self):
         runner = CliRunner()
         with runner.isolated_filesystem():
@@ -218,6 +302,67 @@ class HashStorePersistenceTests(unittest.TestCase):
                 patch.object(run_mod, "HASH_FILE", hash_file):
                 with self.assertRaises(RuntimeError):
                     run_mod.load_hashes()
+
+    def test_load_hashes_does_not_follow_hash_file_symlink_swap(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            ozm_dir = os.path.abspath("ozm")
+            hash_file = os.path.join(ozm_dir, "hashes.yaml")
+            outside = os.path.abspath("outside")
+            victim = os.path.join(outside, "victim.yaml")
+            os.makedirs(ozm_dir)
+            os.makedirs(outside)
+            with open(victim, "w") as f:
+                f.write("project\\0cmd:pytest: attacker-hash\n")
+
+            with patch.object(run_mod, "OZM_DIR", ozm_dir), \
+                patch.object(run_mod, "HASH_FILE", hash_file):
+                real_open = storage_mod.os.open
+                swapped = False
+
+                def swap_hash_file_before_open(path, *args, **kwargs):
+                    nonlocal swapped
+                    if path == os.path.basename(hash_file) and not swapped:
+                        swapped = True
+                        os.symlink(victim, hash_file)
+                    return real_open(path, *args, **kwargs)
+
+                with patch.object(storage_mod.os, "open", side_effect=swap_hash_file_before_open):
+                    with self.assertRaises(RuntimeError):
+                        run_mod.load_hashes()
+
+            self.assertTrue(swapped)
+
+    def test_load_hashes_does_not_follow_ozm_dir_symlink_swap(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            ozm_dir = os.path.abspath("ozm")
+            hash_file = os.path.join(ozm_dir, "hashes.yaml")
+            outside = os.path.abspath("outside")
+            original_ozm_dir = os.path.abspath("ozm-original")
+            os.makedirs(ozm_dir)
+            os.makedirs(outside)
+            with open(os.path.join(outside, "hashes.yaml"), "w") as f:
+                f.write("project\\0cmd:pytest: attacker-hash\n")
+
+            with patch.object(run_mod, "OZM_DIR", ozm_dir), \
+                patch.object(run_mod, "HASH_FILE", hash_file):
+                real_open = storage_mod.os.open
+                swapped = False
+
+                def swap_ozm_dir_before_open(path, *args, **kwargs):
+                    nonlocal swapped
+                    if path == ozm_dir and not swapped:
+                        swapped = True
+                        os.rename(ozm_dir, original_ozm_dir)
+                        os.symlink(outside, ozm_dir)
+                    return real_open(path, *args, **kwargs)
+
+                with patch.object(storage_mod.os, "open", side_effect=swap_ozm_dir_before_open):
+                    with self.assertRaises(RuntimeError):
+                        run_mod.load_hashes()
+
+            self.assertTrue(swapped)
 
 
 class ApprovalCacheBehaviorTests(unittest.TestCase):

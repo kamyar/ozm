@@ -8,6 +8,7 @@ from ozm import cli as cli_mod
 from ozm import config as config_mod
 from ozm import doctor as doctor_mod
 from ozm import install as install_mod
+from ozm import storage as storage_mod
 
 
 class DoctorProjectDocsTests(unittest.TestCase):
@@ -35,9 +36,11 @@ class TrustConfigCliTests(unittest.TestCase):
                 f.write("allowed_commands:\n  - pytest\n")
             os.mkdir("nested")
             os.chdir("nested")
-            projects_dir = os.path.abspath("trusted-projects")
+            ozm_dir = os.path.abspath("trusted")
+            projects_dir = os.path.join(ozm_dir, "projects")
 
-            with patch.object(config_mod, "PROJECTS_DIR", projects_dir):
+            with patch.object(config_mod, "OZM_DIR", ozm_dir), \
+                patch.object(config_mod, "PROJECTS_DIR", projects_dir):
                 project_config = config_mod._project_config_path()
                 result = runner.invoke(cli_mod.trust_cmd)
                 self.assertEqual(result.exit_code, 0, result.output)
@@ -55,9 +58,11 @@ class TrustConfigCliTests(unittest.TestCase):
                 f.write("allowed_commands:\n  - pytest\n")
             os.mkdir("nested")
             os.chdir("nested")
-            projects_dir = os.path.abspath("trusted-projects")
+            ozm_dir = os.path.abspath("trusted")
+            projects_dir = os.path.join(ozm_dir, "projects")
 
-            with patch.object(config_mod, "PROJECTS_DIR", projects_dir):
+            with patch.object(config_mod, "OZM_DIR", ozm_dir), \
+                patch.object(config_mod, "PROJECTS_DIR", projects_dir):
                 result = runner.invoke(cli_mod.trust_cmd)
                 self.assertEqual(result.exit_code, 0, result.output)
                 os.chdir("..")
@@ -75,10 +80,12 @@ class TrustConfigCliTests(unittest.TestCase):
             os.mkdir(".git")
             with open(".ozm.yaml", "w") as f:
                 f.write("allowed_commands:\n  - pytest\n")
-            projects_dir = os.path.abspath("trusted-projects")
-            os.mkdir(projects_dir)
+            ozm_dir = os.path.abspath("trusted")
+            projects_dir = os.path.join(ozm_dir, "projects")
+            os.makedirs(projects_dir)
 
-            with patch.object(config_mod, "PROJECTS_DIR", projects_dir):
+            with patch.object(config_mod, "OZM_DIR", ozm_dir), \
+                patch.object(config_mod, "PROJECTS_DIR", projects_dir):
                 project_config = config_mod._project_config_path()
                 outside = os.path.abspath("outside.yaml")
                 with open(outside, "w") as f:
@@ -93,6 +100,80 @@ class TrustConfigCliTests(unittest.TestCase):
         self.assertNotEqual(result.exit_code, 0)
         self.assertIn("refusing to write through symlink", result.output)
         self.assertEqual(outside_content, "outside: true\n")
+
+    def test_trust_does_not_follow_destination_symlink_swap(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            os.mkdir(".git")
+            with open(".ozm.yaml", "w") as f:
+                f.write("allowed_commands:\n  - pytest\n")
+            ozm_dir = os.path.abspath("trusted")
+            projects_dir = os.path.join(ozm_dir, "projects")
+            outside = os.path.abspath("outside")
+            victim = os.path.join(outside, "victim.yaml")
+            os.makedirs(projects_dir)
+            os.makedirs(outside)
+            with open(victim, "w") as f:
+                f.write("outside: true\n")
+
+            with patch.object(config_mod, "OZM_DIR", ozm_dir), \
+                patch.object(config_mod, "PROJECTS_DIR", projects_dir):
+                project_config = config_mod._project_config_path()
+                real_replace = storage_mod.os.replace
+                swapped = False
+
+                def swap_destination_before_replace(src, dst, *args, **kwargs):
+                    nonlocal swapped
+                    if not swapped:
+                        swapped = True
+                        os.symlink(victim, project_config)
+                    return real_replace(src, dst, *args, **kwargs)
+
+                with patch.object(storage_mod.os, "replace", side_effect=swap_destination_before_replace):
+                    result = runner.invoke(cli_mod.trust_cmd)
+
+            self.assertEqual(result.exit_code, 0, result.output)
+            self.assertTrue(swapped)
+            with open(victim) as f:
+                self.assertEqual(f.read(), "outside: true\n")
+            self.assertFalse(os.path.islink(project_config))
+            with open(project_config) as f:
+                self.assertEqual(f.read(), "allowed_commands:\n  - pytest\n")
+
+    def test_trust_does_not_follow_projects_dir_symlink_swap(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            os.mkdir(".git")
+            with open(".ozm.yaml", "w") as f:
+                f.write("allowed_commands:\n  - pytest\n")
+            ozm_dir = os.path.abspath("trusted")
+            projects_dir = os.path.join(ozm_dir, "projects")
+            outside = os.path.abspath("outside")
+            outside_projects = os.path.join(outside, "projects")
+            original_projects_dir = os.path.join(ozm_dir, "projects-original")
+            os.makedirs(projects_dir)
+            os.makedirs(outside_projects)
+
+            with patch.object(config_mod, "OZM_DIR", ozm_dir), \
+                patch.object(config_mod, "PROJECTS_DIR", projects_dir):
+                real_open = storage_mod.os.open
+                swapped = False
+
+                def swap_projects_dir_before_open(path, *args, **kwargs):
+                    nonlocal swapped
+                    if path == "projects" and not swapped:
+                        swapped = True
+                        os.rename(projects_dir, original_projects_dir)
+                        os.symlink(outside_projects, projects_dir)
+                    return real_open(path, *args, **kwargs)
+
+                with patch.object(storage_mod.os, "open", side_effect=swap_projects_dir_before_open):
+                    result = runner.invoke(cli_mod.trust_cmd)
+
+            self.assertNotEqual(result.exit_code, 0)
+            self.assertIn("symlink", result.output)
+            self.assertTrue(swapped)
+            self.assertEqual(os.listdir(outside_projects), [])
 
 
 class InstallProjectDocsTests(unittest.TestCase):

@@ -3,11 +3,13 @@ import sys
 import unittest
 from unittest.mock import ANY, patch
 
+import yaml
 from click.testing import CliRunner
 
 from ozm import cmd as cmd_mod
 from ozm import config as config_mod
 from ozm import run as run_mod
+from ozm import storage as storage_mod
 from ozm.approve import ApprovalResult
 
 META = [
@@ -40,13 +42,16 @@ class ConfigPersistenceTests(unittest.TestCase):
         runner = CliRunner()
         with runner.isolated_filesystem():
             root = os.path.abspath("repo")
-            projects_dir = os.path.abspath("projects")
+            ozm_dir = os.path.abspath("ozm")
+            projects_dir = os.path.join(ozm_dir, "projects")
             outside = os.path.abspath("outside")
             os.makedirs(root)
+            os.makedirs(ozm_dir)
             os.makedirs(outside)
             os.symlink(outside, projects_dir)
 
-            with patch.object(config_mod, "PROJECTS_DIR", projects_dir), \
+            with patch.object(config_mod, "OZM_DIR", ozm_dir), \
+                patch.object(config_mod, "PROJECTS_DIR", projects_dir), \
                 patch.object(config_mod, "find_project_root", return_value=root):
                 with self.assertRaises(RuntimeError):
                     config_mod.add_allowed_command("pytest *")
@@ -57,7 +62,8 @@ class ConfigPersistenceTests(unittest.TestCase):
         runner = CliRunner()
         with runner.isolated_filesystem():
             root = os.path.abspath("repo")
-            projects_dir = os.path.abspath("projects")
+            ozm_dir = os.path.abspath("ozm")
+            projects_dir = os.path.join(ozm_dir, "projects")
             outside = os.path.abspath("outside")
             victim = os.path.join(outside, "victim.yaml")
             os.makedirs(root)
@@ -66,7 +72,8 @@ class ConfigPersistenceTests(unittest.TestCase):
             with open(victim, "w") as f:
                 f.write("blocked_commands: []\n")
 
-            with patch.object(config_mod, "PROJECTS_DIR", projects_dir), \
+            with patch.object(config_mod, "OZM_DIR", ozm_dir), \
+                patch.object(config_mod, "PROJECTS_DIR", projects_dir), \
                 patch.object(config_mod, "find_project_root", return_value=root):
                 project_config = config_mod._project_config_path()
                 os.symlink(victim, project_config)
@@ -76,6 +83,111 @@ class ConfigPersistenceTests(unittest.TestCase):
 
             with open(victim) as f:
                 self.assertEqual(f.read(), "blocked_commands: []\n")
+
+    def test_project_rule_persistence_does_not_follow_config_file_symlink_swap(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            root = os.path.abspath("repo")
+            ozm_dir = os.path.abspath("ozm")
+            projects_dir = os.path.join(ozm_dir, "projects")
+            outside = os.path.abspath("outside")
+            victim = os.path.join(outside, "victim.yaml")
+            os.makedirs(root)
+            os.makedirs(projects_dir)
+            os.makedirs(outside)
+            with open(victim, "w") as f:
+                f.write("blocked_commands: []\n")
+
+            with patch.object(config_mod, "OZM_DIR", ozm_dir), \
+                patch.object(config_mod, "PROJECTS_DIR", projects_dir), \
+                patch.object(config_mod, "find_project_root", return_value=root):
+                project_config = config_mod._project_config_path()
+                real_replace = storage_mod.os.replace
+                swapped = False
+
+                def swap_config_file_before_replace(src, dst, *args, **kwargs):
+                    nonlocal swapped
+                    if not swapped:
+                        swapped = True
+                        os.symlink(victim, project_config)
+                    return real_replace(src, dst, *args, **kwargs)
+
+                with patch.object(storage_mod.os, "replace", side_effect=swap_config_file_before_replace):
+                    self.assertTrue(config_mod.add_blocked_command("curl * | sh"))
+
+            self.assertTrue(swapped)
+            with open(victim) as f:
+                self.assertEqual(f.read(), "blocked_commands: []\n")
+            self.assertFalse(os.path.islink(project_config))
+            with open(project_config) as f:
+                self.assertEqual(yaml.safe_load(f), {"blocked_commands": ["curl * | sh"]})
+
+    def test_project_rule_persistence_does_not_follow_projects_dir_symlink_swap(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            root = os.path.abspath("repo")
+            ozm_dir = os.path.abspath("ozm")
+            projects_dir = os.path.join(ozm_dir, "projects")
+            outside = os.path.abspath("outside")
+            original_projects_dir = os.path.abspath("projects-original")
+            os.makedirs(root)
+            os.makedirs(projects_dir)
+            os.makedirs(outside)
+
+            with patch.object(config_mod, "OZM_DIR", ozm_dir), \
+                patch.object(config_mod, "PROJECTS_DIR", projects_dir), \
+                patch.object(config_mod, "find_project_root", return_value=root):
+                real_open = storage_mod.os.open
+                swapped = False
+
+                def swap_projects_dir_before_open(path, *args, **kwargs):
+                    nonlocal swapped
+                    if path in {projects_dir, "projects"} and not swapped:
+                        swapped = True
+                        os.rename(projects_dir, original_projects_dir)
+                        os.symlink(outside, projects_dir)
+                    return real_open(path, *args, **kwargs)
+
+                with patch.object(storage_mod.os, "open", side_effect=swap_projects_dir_before_open):
+                    with self.assertRaises(RuntimeError):
+                        config_mod.add_allowed_command("pytest *")
+
+            self.assertTrue(swapped)
+            self.assertEqual(os.listdir(outside), [])
+
+    def test_project_rule_persistence_does_not_follow_ozm_dir_ancestor_symlink_swap(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            root = os.path.abspath("repo")
+            ozm_dir = os.path.abspath("ozm")
+            projects_dir = os.path.join(ozm_dir, "projects")
+            outside = os.path.abspath("outside")
+            outside_projects_dir = os.path.join(outside, "projects")
+            original_ozm_dir = os.path.abspath("ozm-original")
+            os.makedirs(root)
+            os.makedirs(projects_dir)
+            os.makedirs(outside_projects_dir)
+
+            with patch.object(config_mod, "OZM_DIR", ozm_dir), \
+                patch.object(config_mod, "PROJECTS_DIR", projects_dir), \
+                patch.object(config_mod, "find_project_root", return_value=root):
+                real_open = storage_mod.os.open
+                swapped = False
+
+                def swap_ozm_dir_before_open(path, *args, **kwargs):
+                    nonlocal swapped
+                    if path in {ozm_dir, projects_dir} and not swapped:
+                        swapped = True
+                        os.rename(ozm_dir, original_ozm_dir)
+                        os.symlink(outside, ozm_dir)
+                    return real_open(path, *args, **kwargs)
+
+                with patch.object(storage_mod.os, "open", side_effect=swap_ozm_dir_before_open):
+                    with self.assertRaises(RuntimeError):
+                        config_mod.add_allowed_command("pytest *")
+
+            self.assertTrue(swapped)
+            self.assertEqual(os.listdir(outside_projects_dir), [])
 
     def test_global_rule_persistence_refuses_symlinked_ozm_dir(self):
         runner = CliRunner()
@@ -113,6 +225,89 @@ class ConfigPersistenceTests(unittest.TestCase):
 
             with open(victim) as f:
                 self.assertEqual(f.read(), "allowed_commands: []\n")
+
+    def test_global_rule_persistence_does_not_follow_config_file_symlink_swap(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            ozm_dir = os.path.abspath("ozm")
+            global_config = os.path.join(ozm_dir, "config.yaml")
+            outside = os.path.abspath("outside")
+            victim = os.path.join(outside, "victim.yaml")
+            os.makedirs(ozm_dir)
+            os.makedirs(outside)
+            with open(victim, "w") as f:
+                f.write("allowed_commands: []\n")
+
+            with patch.object(config_mod, "OZM_DIR", ozm_dir), \
+                patch.object(config_mod, "GLOBAL_CONFIG", global_config):
+                real_replace = storage_mod.os.replace
+                swapped = False
+
+                def swap_config_file_before_replace(src, dst, *args, **kwargs):
+                    nonlocal swapped
+                    if not swapped:
+                        swapped = True
+                        os.symlink(victim, global_config)
+                    return real_replace(src, dst, *args, **kwargs)
+
+                with patch.object(storage_mod.os, "replace", side_effect=swap_config_file_before_replace):
+                    self.assertTrue(config_mod.add_allowed_command("pytest *", global_scope=True))
+
+            self.assertTrue(swapped)
+            with open(victim) as f:
+                self.assertEqual(f.read(), "allowed_commands: []\n")
+            self.assertFalse(os.path.islink(global_config))
+            with open(global_config) as f:
+                self.assertEqual(yaml.safe_load(f), {"allowed_commands": ["pytest *"]})
+
+    def test_global_rule_persistence_does_not_follow_ozm_dir_symlink_swap(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            ozm_dir = os.path.abspath("ozm")
+            global_config = os.path.join(ozm_dir, "config.yaml")
+            outside = os.path.abspath("outside")
+            original_ozm_dir = os.path.abspath("ozm-original")
+            os.makedirs(ozm_dir)
+            os.makedirs(outside)
+
+            with patch.object(config_mod, "OZM_DIR", ozm_dir), \
+                patch.object(config_mod, "GLOBAL_CONFIG", global_config):
+                real_open = storage_mod.os.open
+                swapped = False
+
+                def swap_ozm_dir_before_open(path, *args, **kwargs):
+                    nonlocal swapped
+                    if path == ozm_dir and not swapped:
+                        swapped = True
+                        os.rename(ozm_dir, original_ozm_dir)
+                        os.symlink(outside, ozm_dir)
+                    return real_open(path, *args, **kwargs)
+
+                with patch.object(storage_mod.os, "open", side_effect=swap_ozm_dir_before_open):
+                    with self.assertRaises(RuntimeError):
+                        config_mod.add_blocked_command("curl * | sh", global_scope=True)
+
+            self.assertTrue(swapped)
+            self.assertEqual(os.listdir(outside), [])
+
+    def test_global_rule_persistence_preserves_existing_file_when_yaml_write_fails(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            ozm_dir = os.path.abspath("ozm")
+            global_config = os.path.join(ozm_dir, "config.yaml")
+            original = "allowed_commands:\n- existing *\n"
+            os.makedirs(ozm_dir)
+            with open(global_config, "w") as f:
+                f.write(original)
+
+            with patch.object(config_mod, "OZM_DIR", ozm_dir), \
+                patch.object(config_mod, "GLOBAL_CONFIG", global_config), \
+                patch.object(storage_mod.yaml, "dump", side_effect=RuntimeError("boom")):
+                with self.assertRaises(RuntimeError):
+                    config_mod.add_allowed_command("pytest *", global_scope=True)
+
+            with open(global_config) as f:
+                self.assertEqual(f.read(), original)
 
     def test_project_and_global_rule_persistence_round_trip_to_expected_files(self):
         runner = CliRunner()
@@ -170,13 +365,16 @@ class ConfigLoadSafetyTests(unittest.TestCase):
         runner = CliRunner()
         with runner.isolated_filesystem():
             root = os.path.abspath("repo")
-            projects_dir = os.path.abspath("projects")
+            ozm_dir = os.path.abspath("ozm")
+            projects_dir = os.path.join(ozm_dir, "projects")
             outside = os.path.abspath("outside")
             os.makedirs(root)
+            os.makedirs(ozm_dir)
             os.makedirs(outside)
             os.symlink(outside, projects_dir)
 
-            with patch.object(config_mod, "PROJECTS_DIR", projects_dir), \
+            with patch.object(config_mod, "OZM_DIR", ozm_dir), \
+                patch.object(config_mod, "PROJECTS_DIR", projects_dir), \
                 patch.object(config_mod, "find_project_root", return_value=root):
                 project_config = config_mod._project_config_path()
                 with open(os.path.join(outside, os.path.basename(project_config)), "w") as f:
@@ -189,7 +387,8 @@ class ConfigLoadSafetyTests(unittest.TestCase):
         runner = CliRunner()
         with runner.isolated_filesystem():
             root = os.path.abspath("repo")
-            projects_dir = os.path.abspath("projects")
+            ozm_dir = os.path.abspath("ozm")
+            projects_dir = os.path.join(ozm_dir, "projects")
             outside = os.path.abspath("outside")
             victim = os.path.join(outside, "victim.yaml")
             os.makedirs(root)
@@ -198,13 +397,48 @@ class ConfigLoadSafetyTests(unittest.TestCase):
             with open(victim, "w") as f:
                 f.write("allowed_commands:\n  - echo *\n")
 
-            with patch.object(config_mod, "PROJECTS_DIR", projects_dir), \
+            with patch.object(config_mod, "OZM_DIR", ozm_dir), \
+                patch.object(config_mod, "PROJECTS_DIR", projects_dir), \
                 patch.object(config_mod, "find_project_root", return_value=root):
                 project_config = config_mod._project_config_path()
                 os.symlink(victim, project_config)
 
                 with self.assertRaises(RuntimeError):
                     config_mod.load_project_config()
+
+    def test_project_config_load_does_not_follow_config_file_symlink_swap(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            root = os.path.abspath("repo")
+            ozm_dir = os.path.abspath("ozm")
+            projects_dir = os.path.join(ozm_dir, "projects")
+            outside = os.path.abspath("outside")
+            victim = os.path.join(outside, "victim.yaml")
+            os.makedirs(root)
+            os.makedirs(projects_dir)
+            os.makedirs(outside)
+            with open(victim, "w") as f:
+                f.write("allowed_commands:\n  - echo *\n")
+
+            with patch.object(config_mod, "OZM_DIR", ozm_dir), \
+                patch.object(config_mod, "PROJECTS_DIR", projects_dir), \
+                patch.object(config_mod, "find_project_root", return_value=root):
+                project_config = config_mod._project_config_path()
+                real_open = storage_mod.os.open
+                swapped = False
+
+                def swap_config_file_before_open(path, *args, **kwargs):
+                    nonlocal swapped
+                    if path == os.path.basename(project_config) and not swapped:
+                        swapped = True
+                        os.symlink(victim, project_config)
+                    return real_open(path, *args, **kwargs)
+
+                with patch.object(storage_mod.os, "open", side_effect=swap_config_file_before_open):
+                    with self.assertRaises(RuntimeError):
+                        config_mod.load_project_config()
+
+            self.assertTrue(swapped)
 
     def test_global_config_load_refuses_symlinked_config_file(self):
         runner = CliRunner()
@@ -223,6 +457,36 @@ class ConfigLoadSafetyTests(unittest.TestCase):
                 patch.object(config_mod, "GLOBAL_CONFIG", global_config):
                 with self.assertRaises(RuntimeError):
                     config_mod.load_global_config()
+
+    def test_global_config_load_does_not_follow_config_file_symlink_swap(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            ozm_dir = os.path.abspath("ozm")
+            global_config = os.path.join(ozm_dir, "config.yaml")
+            outside = os.path.abspath("outside")
+            victim = os.path.join(outside, "victim.yaml")
+            os.makedirs(ozm_dir)
+            os.makedirs(outside)
+            with open(victim, "w") as f:
+                f.write("allowed_commands:\n  - echo *\n")
+
+            with patch.object(config_mod, "OZM_DIR", ozm_dir), \
+                patch.object(config_mod, "GLOBAL_CONFIG", global_config):
+                real_open = storage_mod.os.open
+                swapped = False
+
+                def swap_config_file_before_open(path, *args, **kwargs):
+                    nonlocal swapped
+                    if path == os.path.basename(global_config) and not swapped:
+                        swapped = True
+                        os.symlink(victim, global_config)
+                    return real_open(path, *args, **kwargs)
+
+                with patch.object(storage_mod.os, "open", side_effect=swap_config_file_before_open):
+                    with self.assertRaises(RuntimeError):
+                        config_mod.load_global_config()
+
+            self.assertTrue(swapped)
 
     def test_global_config_load_refuses_symlinked_ozm_dir(self):
         runner = CliRunner()
@@ -244,13 +508,15 @@ class ConfigLoadSafetyTests(unittest.TestCase):
         runner = CliRunner()
         with runner.isolated_filesystem():
             root = os.path.abspath("repo")
-            projects_dir = os.path.abspath("projects")
+            ozm_dir = os.path.abspath("ozm")
+            projects_dir = os.path.join(ozm_dir, "projects")
             outside = os.path.abspath("outside")
             os.makedirs(root)
             os.makedirs(projects_dir)
             os.makedirs(outside)
 
-            with patch.object(config_mod, "PROJECTS_DIR", projects_dir), \
+            with patch.object(config_mod, "OZM_DIR", ozm_dir), \
+                patch.object(config_mod, "PROJECTS_DIR", projects_dir), \
                 patch.object(config_mod, "find_project_root", return_value=root):
                 project_config = config_mod._project_config_path()
                 victim = os.path.join(outside, "victim.yaml")
@@ -285,6 +551,7 @@ class ConfigLoadSafetyTests(unittest.TestCase):
             os.symlink(victim, global_config)
 
             with patch.object(config_mod, "OZM_DIR", ozm_dir), \
+                patch.object(config_mod, "PROJECTS_DIR", os.path.join(ozm_dir, "projects")), \
                 patch.object(config_mod, "GLOBAL_CONFIG", global_config), \
                 patch.object(cmd_mod, "_run_command") as run_command, \
                 patch.object(cmd_mod, "request_cmd_approval") as request_cmd_approval, \
@@ -356,6 +623,7 @@ class CommandConfigPersistenceFailureTests(unittest.TestCase):
             root = os.path.abspath("repo")
             ozm_dir = os.path.abspath("ozm")
             projects_dir = os.path.join(ozm_dir, "projects")
+            global_config = os.path.join(ozm_dir, "config.yaml")
             hash_file = os.path.join(ozm_dir, "hashes.yaml")
             outside = os.path.abspath("outside")
             victim = os.path.join(outside, "victim.yaml")
@@ -365,6 +633,7 @@ class CommandConfigPersistenceFailureTests(unittest.TestCase):
 
             with patch.object(config_mod, "OZM_DIR", ozm_dir), \
                 patch.object(config_mod, "PROJECTS_DIR", projects_dir), \
+                patch.object(config_mod, "GLOBAL_CONFIG", global_config), \
                 patch.object(config_mod, "find_project_root", return_value=root), \
                 patch.object(run_mod, "OZM_DIR", ozm_dir), \
                 patch.object(run_mod, "HASH_FILE", hash_file):

@@ -13,7 +13,7 @@ import re
 import shlex
 import unicodedata
 
-import yaml
+from ozm.storage import load_yaml_no_follow, refuse_symlink, save_yaml_atomic_no_follow
 
 SHELL_METACHARS = frozenset(";|&$`\n()<>{}[]")
 
@@ -159,30 +159,45 @@ def _global_config_path() -> str:
 
 
 def _load_yaml(path: str) -> dict:
-    _refuse_symlink(path, "config file")
-    if not os.path.exists(path):
-        return {}
-    with open(path) as f:
-        data = yaml.safe_load(f)
-        return data if isinstance(data, dict) else {}
+    return load_yaml_no_follow(
+        path,
+        directory=os.path.dirname(path),
+        directory_label="config directory",
+        file_label="config file",
+    )
 
 
 def _refuse_symlink(path: str, label: str) -> None:
-    if os.path.islink(path):
-        raise RuntimeError(f"refusing to use symlinked {label}: {path}")
+    refuse_symlink(path, label)
 
 
 def load_project_config() -> dict:
     """Load config from ~/.ozm/projects/. Never reads in-repo files."""
     _refuse_symlink(OZM_DIR, "config directory")
     _refuse_symlink(PROJECTS_DIR, "project config directory")
-    return _load_yaml(_project_config_path())
+    path = _project_config_path()
+    _refuse_symlink(path, "config file")
+    return load_yaml_no_follow(
+        path,
+        directory=PROJECTS_DIR,
+        directory_label="project config directory",
+        file_label="config file",
+        parent_directory=OZM_DIR,
+        parent_label="config directory",
+    )
 
 
 def load_global_config() -> dict:
     """Load config from ~/.ozm/config.yaml."""
     _refuse_symlink(OZM_DIR, "config directory")
-    return _load_yaml(_global_config_path())
+    path = _global_config_path()
+    _refuse_symlink(path, "config file")
+    return load_yaml_no_follow(
+        path,
+        directory=OZM_DIR,
+        directory_label="config directory",
+        file_label="config file",
+    )
 
 
 def _save_user_config(config: dict) -> None:
@@ -190,20 +205,30 @@ def _save_user_config(config: dict) -> None:
     path = _project_config_path()
     _refuse_symlink(OZM_DIR, "config directory")
     _refuse_symlink(PROJECTS_DIR, "project config directory")
-    os.makedirs(PROJECTS_DIR, exist_ok=True)
     _refuse_symlink(path, "project config file")
-    with open(path, "w") as f:
-        yaml.dump(config, f, default_flow_style=False, sort_keys=False)
+    save_yaml_atomic_no_follow(
+        path,
+        config,
+        directory=PROJECTS_DIR,
+        directory_label="project config directory",
+        parent_directory=OZM_DIR,
+        parent_label="config directory",
+        sort_keys=False,
+    )
 
 
 def _save_global_config(config: dict) -> None:
     """Save to the user-owned global config file."""
     path = _global_config_path()
     _refuse_symlink(OZM_DIR, "config directory")
-    os.makedirs(OZM_DIR, exist_ok=True)
     _refuse_symlink(path, "global config file")
-    with open(path, "w") as f:
-        yaml.dump(config, f, default_flow_style=False, sort_keys=False)
+    save_yaml_atomic_no_follow(
+        path,
+        config,
+        directory=OZM_DIR,
+        directory_label="config directory",
+        sort_keys=False,
+    )
 
 
 def _command_configs() -> list[dict]:
