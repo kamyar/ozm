@@ -115,14 +115,21 @@ class CommandApprovalParserTests(unittest.TestCase):
         self.assertIsNone(parsed.command)
         self.assertIsNone(parsed.allow_pattern)
 
-    def test_legacy_three_field_output_still_parses_feedback(self):
+    def test_legacy_three_field_output_fails_closed(self):
         parsed = self._parse("DENY:curl example.com%%OZM_SEP%%curl *%%OZM_SEP%%too risky")
 
-        self.assertFalse(parsed.approved)
-        self.assertEqual(parsed.command, "curl example.com")
-        self.assertEqual(parsed.block_pattern, "curl *")
-        self.assertFalse(parsed.apply_globally)
-        self.assertEqual(parsed.feedback, "too risky")
+        self.assertIsNone(parsed.approved)
+        self.assertIsNone(parsed.command)
+        self.assertIsNone(parsed.block_pattern)
+
+    def test_extra_separator_in_dialog_output_fails_closed(self):
+        parsed = self._parse(
+            "ALLOW:echo%%OZM_SEP%%pwn%%OZM_SEP%%1%%OZM_SEP%%0%%OZM_SEP%%ok"
+        )
+
+        self.assertIsNone(parsed.approved)
+        self.assertIsNone(parsed.command)
+        self.assertIsNone(parsed.allow_pattern)
 
 
 if __name__ == "__main__":
