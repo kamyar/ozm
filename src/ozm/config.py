@@ -166,6 +166,11 @@ def _load_yaml(path: str) -> dict:
         return data if isinstance(data, dict) else {}
 
 
+def _refuse_symlink(path: str, label: str) -> None:
+    if os.path.islink(path):
+        raise RuntimeError(f"refusing to use symlinked {label}: {path}")
+
+
 def load_project_config() -> dict:
     """Load config from ~/.ozm/projects/. Never reads in-repo files."""
     return _load_yaml(_project_config_path())
@@ -179,7 +184,10 @@ def load_global_config() -> dict:
 def _save_user_config(config: dict) -> None:
     """Save to the user-owned config file in ~/.ozm/projects/."""
     path = _project_config_path()
+    _refuse_symlink(OZM_DIR, "config directory")
+    _refuse_symlink(PROJECTS_DIR, "project config directory")
     os.makedirs(PROJECTS_DIR, exist_ok=True)
+    _refuse_symlink(path, "project config file")
     with open(path, "w") as f:
         yaml.dump(config, f, default_flow_style=False, sort_keys=False)
 
@@ -187,7 +195,9 @@ def _save_user_config(config: dict) -> None:
 def _save_global_config(config: dict) -> None:
     """Save to the user-owned global config file."""
     path = _global_config_path()
+    _refuse_symlink(OZM_DIR, "config directory")
     os.makedirs(OZM_DIR, exist_ok=True)
+    _refuse_symlink(path, "global config file")
     with open(path, "w") as f:
         yaml.dump(config, f, default_flow_style=False, sort_keys=False)
 
