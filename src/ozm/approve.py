@@ -491,7 +491,10 @@ def _parse_cmd_result(result: subprocess.CompletedProcess) -> ApprovalResult:
             rest = output[len(prefix):]
             parts = rest.split("%%OZM_SEP%%")
             if len(parts) != 4:
-                return ApprovalResult(approved=None)
+                return ApprovalResult(
+                    approved=None,
+                    feedback="malformed command dialog output",
+                )
             raw_cmd = parts[0]
             if "\n" in raw_cmd or "\r" in raw_cmd:
                 return ApprovalResult(
@@ -500,12 +503,18 @@ def _parse_cmd_result(result: subprocess.CompletedProcess) -> ApprovalResult:
                 )
             cmd = raw_cmd.strip()
             if not cmd:
-                return ApprovalResult(approved=None)
+                return ApprovalResult(
+                    approved=None,
+                    feedback="edited command is empty",
+                )
             pattern = parts[1].strip() if len(parts) > 1 and parts[1].strip() else None
             apply_globally = False
             global_marker = parts[2].strip()
             if global_marker not in ("0", "1"):
-                return ApprovalResult(approved=None)
+                return ApprovalResult(
+                    approved=None,
+                    feedback="malformed command dialog output",
+                )
             apply_globally = global_marker == "1"
             feedback = parts[3].strip() if parts[3].strip() else None
             allow_pattern = pattern if approved else None
@@ -518,7 +527,7 @@ def _parse_cmd_result(result: subprocess.CompletedProcess) -> ApprovalResult:
                 block_pattern=block_pattern,
                 apply_globally=apply_globally,
             )
-    return ApprovalResult(approved=None)
+    return ApprovalResult(approved=None, feedback="unexpected command dialog output")
 
 
 def _approve_cmd_macos(command: str, agent: AgentMetadata) -> ApprovalResult:

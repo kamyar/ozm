@@ -83,7 +83,7 @@ class ApprovalTemporaryFileTests(unittest.TestCase):
         with patch.object(approve_mod.subprocess, "run", side_effect=fake_run):
             result = approve_mod._approve_cmd_macos("echo hello", agent)
 
-        self.assertFalse(result.approved)
+        self.assertIs(result.approved, False)
         self.assertEqual(result.feedback, "not now")
         self.assertIsNotNone(captured_path)
         self.assertFalse(os.path.exists(captured_path))
@@ -133,8 +133,11 @@ class CommandApprovalParserTests(unittest.TestCase):
         parsed = self._parse("ALLOW:%%OZM_SEP%%pytest *%%OZM_SEP%%1%%OZM_SEP%%ok")
 
         self.assertIsNone(parsed.approved)
+        self.assertEqual(parsed.feedback, "edited command is empty")
         self.assertIsNone(parsed.command)
         self.assertIsNone(parsed.allow_pattern)
+        self.assertIsNone(parsed.block_pattern)
+        self.assertFalse(parsed.apply_globally)
 
     def test_invalid_global_marker_fails_closed(self):
         parsed = self._parse(
@@ -142,15 +145,21 @@ class CommandApprovalParserTests(unittest.TestCase):
         )
 
         self.assertIsNone(parsed.approved)
+        self.assertEqual(parsed.feedback, "malformed command dialog output")
         self.assertIsNone(parsed.command)
         self.assertIsNone(parsed.allow_pattern)
+        self.assertIsNone(parsed.block_pattern)
+        self.assertFalse(parsed.apply_globally)
 
     def test_legacy_three_field_output_fails_closed(self):
         parsed = self._parse("DENY:curl example.com%%OZM_SEP%%curl *%%OZM_SEP%%too risky")
 
         self.assertIsNone(parsed.approved)
+        self.assertEqual(parsed.feedback, "malformed command dialog output")
         self.assertIsNone(parsed.command)
+        self.assertIsNone(parsed.allow_pattern)
         self.assertIsNone(parsed.block_pattern)
+        self.assertFalse(parsed.apply_globally)
 
     def test_extra_separator_in_dialog_output_fails_closed(self):
         parsed = self._parse(
@@ -158,8 +167,21 @@ class CommandApprovalParserTests(unittest.TestCase):
         )
 
         self.assertIsNone(parsed.approved)
+        self.assertEqual(parsed.feedback, "malformed command dialog output")
         self.assertIsNone(parsed.command)
         self.assertIsNone(parsed.allow_pattern)
+        self.assertIsNone(parsed.block_pattern)
+        self.assertFalse(parsed.apply_globally)
+
+    def test_unexpected_output_reports_feedback(self):
+        parsed = self._parse("APPROVE:echo")
+
+        self.assertIsNone(parsed.approved)
+        self.assertEqual(parsed.feedback, "unexpected command dialog output")
+        self.assertIsNone(parsed.command)
+        self.assertIsNone(parsed.allow_pattern)
+        self.assertIsNone(parsed.block_pattern)
+        self.assertFalse(parsed.apply_globally)
 
     def test_multiline_edited_command_fails_closed(self):
         for line_break in ("\n", "\r", "\r\n"):
@@ -172,6 +194,8 @@ class CommandApprovalParserTests(unittest.TestCase):
                 self.assertEqual(parsed.feedback, "edited command must be one line")
                 self.assertIsNone(parsed.command)
                 self.assertIsNone(parsed.allow_pattern)
+                self.assertIsNone(parsed.block_pattern)
+                self.assertFalse(parsed.apply_globally)
 
 
 if __name__ == "__main__":
