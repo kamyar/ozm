@@ -490,11 +490,18 @@ def _parse_cmd_result(result: subprocess.CompletedProcess) -> ApprovalResult:
         if output.startswith(prefix):
             rest = output[len(prefix):]
             parts = rest.split("%%OZM_SEP%%", 3)
-            cmd = parts[0].replace("\n", " ").strip() or None
+            if len(parts) not in (3, 4):
+                return ApprovalResult(approved=None)
+            cmd = parts[0].replace("\n", " ").strip()
+            if not cmd:
+                return ApprovalResult(approved=None)
             pattern = parts[1].strip() if len(parts) > 1 and parts[1].strip() else None
             apply_globally = False
             if len(parts) > 3:
-                apply_globally = parts[2].strip() == "1"
+                global_marker = parts[2].strip()
+                if global_marker not in ("0", "1"):
+                    return ApprovalResult(approved=None)
+                apply_globally = global_marker == "1"
                 feedback = parts[3].strip() if parts[3].strip() else None
             else:
                 feedback = parts[2].strip() if len(parts) > 2 and parts[2].strip() else None

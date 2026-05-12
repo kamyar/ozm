@@ -89,5 +89,41 @@ class ApprovalTemporaryFileTests(unittest.TestCase):
         self.assertFalse(os.path.exists(captured_path))
 
 
+class CommandApprovalParserTests(unittest.TestCase):
+    def _parse(self, stdout):
+        result = subprocess.CompletedProcess(
+            args=["osascript"],
+            returncode=0,
+            stdout=stdout,
+            stderr="",
+        )
+        return approve_mod._parse_cmd_result(result)
+
+    def test_empty_approved_command_fails_closed(self):
+        parsed = self._parse("ALLOW:%%OZM_SEP%%pytest *%%OZM_SEP%%1%%OZM_SEP%%ok")
+
+        self.assertIsNone(parsed.approved)
+        self.assertIsNone(parsed.command)
+        self.assertIsNone(parsed.allow_pattern)
+
+    def test_invalid_global_marker_fails_closed(self):
+        parsed = self._parse(
+            "ALLOW:pytest tests%%OZM_SEP%%pytest *%%OZM_SEP%%maybe%%OZM_SEP%%ok"
+        )
+
+        self.assertIsNone(parsed.approved)
+        self.assertIsNone(parsed.command)
+        self.assertIsNone(parsed.allow_pattern)
+
+    def test_legacy_three_field_output_still_parses_feedback(self):
+        parsed = self._parse("DENY:curl example.com%%OZM_SEP%%curl *%%OZM_SEP%%too risky")
+
+        self.assertFalse(parsed.approved)
+        self.assertEqual(parsed.command, "curl example.com")
+        self.assertEqual(parsed.block_pattern, "curl *")
+        self.assertFalse(parsed.apply_globally)
+        self.assertEqual(parsed.feedback, "too risky")
+
+
 if __name__ == "__main__":
     unittest.main()
