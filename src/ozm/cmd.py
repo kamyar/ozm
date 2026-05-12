@@ -190,7 +190,15 @@ def cmd_cmd(command_and_args: tuple[str, ...]) -> None:
             allow_pattern = run_command
         if allow_pattern:
             scope = _scope_label(approval.apply_globally)
-            if add_allowed_command(allow_pattern, global_scope=approval.apply_globally):
+            try:
+                added = add_allowed_command(allow_pattern, global_scope=approval.apply_globally)
+            except (OSError, RuntimeError) as exc:
+                audit_log("error", "cmd", run_command, str(exc))
+                raise click.ClickException(
+                    f"could not save {scope} allowlist pattern '{allow_pattern}': {exc}. "
+                    "The command was NOT executed."
+                ) from exc
+            if added:
                 click.echo(
                     f"ozm: added {scope} allowlist pattern: {allow_pattern}",
                     err=True,
@@ -221,7 +229,15 @@ def cmd_cmd(command_and_args: tuple[str, ...]) -> None:
             block_pattern = approval.command or command
         if block_pattern:
             scope = _scope_label(approval.apply_globally)
-            if add_blocked_command(block_pattern, global_scope=approval.apply_globally):
+            try:
+                added = add_blocked_command(block_pattern, global_scope=approval.apply_globally)
+            except (OSError, RuntimeError) as exc:
+                audit_log("error", "cmd", command, str(exc))
+                raise click.ClickException(
+                    f"could not save {scope} blocklist pattern '{block_pattern}': {exc}. "
+                    "The command was NOT executed."
+                ) from exc
+            if added:
                 click.echo(
                     f"ozm: added {scope} blocklist pattern: {block_pattern}",
                     err=True,

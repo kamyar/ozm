@@ -1,10 +1,19 @@
 import os
+import sys
 import unittest
-from unittest.mock import patch
+from unittest.mock import ANY, patch
 
 from click.testing import CliRunner
 
+from ozm import cmd as cmd_mod
 from ozm import config as config_mod
+from ozm import run as run_mod
+from ozm.approve import ApprovalResult
+
+META = [
+    "--agent-name", "Config persistence test",
+    "--agent-description", "Exercise config rule persistence failures.",
+]
 
 
 class ConfigPersistenceTests(unittest.TestCase):
@@ -133,6 +142,95 @@ class ConfigPersistenceTests(unittest.TestCase):
 
             self.assertTrue(os.path.isfile(project_config))
             self.assertTrue(os.path.isfile(global_config))
+
+
+class CommandConfigPersistenceFailureTests(unittest.TestCase):
+    def test_allow_rule_save_failure_does_not_execute_or_cache(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            ozm_dir = os.path.abspath("ozm")
+            global_config = os.path.join(ozm_dir, "config.yaml")
+            hash_file = os.path.join(ozm_dir, "hashes.yaml")
+            outside = os.path.abspath("outside")
+            victim = os.path.join(outside, "victim.yaml")
+            os.makedirs(ozm_dir)
+            os.makedirs(outside)
+            with open(victim, "w") as f:
+                f.write("allowed_commands: []\n")
+            os.symlink(victim, global_config)
+
+            with patch.object(config_mod, "OZM_DIR", ozm_dir), \
+                patch.object(config_mod, "PROJECTS_DIR", os.path.join(ozm_dir, "projects")), \
+                patch.object(config_mod, "GLOBAL_CONFIG", global_config), \
+                patch.object(run_mod, "OZM_DIR", ozm_dir), \
+                patch.object(run_mod, "HASH_FILE", hash_file), \
+                patch.object(cmd_mod, "request_cmd_approval", return_value=ApprovalResult(
+                    approved=True,
+                    allow_pattern="python *",
+                    apply_globally=True,
+                )), \
+                patch.object(cmd_mod, "audit_log") as audit_log:
+                result = runner.invoke(
+                    cmd_mod.cmd_cmd,
+                    [
+                        *META,
+                        sys.executable,
+                        "-c",
+                        "from pathlib import Path; Path('executed.txt').write_text('ran')",
+                    ],
+                )
+
+            self.assertFalse(os.path.exists("executed.txt"))
+            self.assertFalse(os.path.exists(hash_file))
+            with open(victim) as f:
+                self.assertEqual(f.read(), "allowed_commands: []\n")
+
+        self.assertNotEqual(result.exit_code, 0)
+        self.assertIn("could not save global allowlist pattern", result.output)
+        self.assertIn("command was NOT executed", result.output)
+        self.assertNotIn("approved cmd", result.output)
+        audit_log.assert_called_with("error", "cmd", ANY, ANY)
+
+    def test_block_rule_save_failure_does_not_claim_rule_was_added(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            root = os.path.abspath("repo")
+            ozm_dir = os.path.abspath("ozm")
+            projects_dir = os.path.join(ozm_dir, "projects")
+            hash_file = os.path.join(ozm_dir, "hashes.yaml")
+            outside = os.path.abspath("outside")
+            victim = os.path.join(outside, "victim.yaml")
+            os.makedirs(root)
+            os.makedirs(projects_dir)
+            os.makedirs(outside)
+            with open(victim, "w") as f:
+                f.write("blocked_commands: []\n")
+
+            with patch.object(config_mod, "OZM_DIR", ozm_dir), \
+                patch.object(config_mod, "PROJECTS_DIR", projects_dir), \
+                patch.object(config_mod, "find_project_root", return_value=root), \
+                patch.object(run_mod, "OZM_DIR", ozm_dir), \
+                patch.object(run_mod, "HASH_FILE", hash_file):
+                project_config = config_mod._project_config_path()
+                os.symlink(victim, project_config)
+
+                with patch.object(cmd_mod, "request_cmd_approval", return_value=ApprovalResult(
+                    approved=False,
+                    block_pattern="curl * | sh",
+                    apply_globally=False,
+                )), \
+                    patch.object(cmd_mod, "audit_log") as audit_log:
+                    result = runner.invoke(cmd_mod.cmd_cmd, [*META, "curl", "example.com"])
+
+            self.assertFalse(os.path.exists(hash_file))
+            with open(victim) as f:
+                self.assertEqual(f.read(), "blocked_commands: []\n")
+
+        self.assertNotEqual(result.exit_code, 0)
+        self.assertIn("could not save project blocklist pattern", result.output)
+        self.assertIn("command was NOT executed", result.output)
+        self.assertNotIn("added project blocklist pattern", result.output)
+        audit_log.assert_called_with("error", "cmd", "curl example.com", ANY)
 
 
 if __name__ == "__main__":
