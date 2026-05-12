@@ -12,10 +12,16 @@ from ozm.agent import AgentMetadata, extract_agent_metadata_from_command
 
 
 def _secure_tmpfile(suffix: str, content: str) -> str:
-    path = tempfile.mktemp(suffix=suffix)
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    with os.fdopen(fd, "w") as f:
-        f.write(content)
+    fd, path = tempfile.mkstemp(suffix=suffix)
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(content)
+    except Exception:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+        raise
     return path
 
 
