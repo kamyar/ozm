@@ -2,12 +2,17 @@
 """Append-only audit log for ozm approvals and denials."""
 
 import os
+import json
 from datetime import datetime, timezone
 
 import click
 
 OZM_DIR = os.path.expanduser("~/.ozm")
 AUDIT_FILE = os.path.join(OZM_DIR, "audit.log")
+
+
+def _one_line(value: str) -> str:
+    return json.dumps(str(value), ensure_ascii=True)[1:-1]
 
 
 def log(action: str, kind: str, target: str, feedback: str | None = None) -> None:
@@ -19,16 +24,16 @@ def log(action: str, kind: str, target: str, feedback: str | None = None) -> Non
     """
     os.makedirs(OZM_DIR, exist_ok=True)
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-    cwd = os.getcwd()
-    line = f"{ts}  {action:<9}  {kind:<3}  {cwd}  {target}"
+    cwd = _one_line(os.getcwd())
+    line = f"{ts}  {_one_line(action):<9}  {_one_line(kind):<3}  {cwd}  {_one_line(target)}"
     if feedback:
-        line += f"  # {feedback}"
+        line += f"  # {_one_line(feedback)}"
     with open(AUDIT_FILE, "a") as f:
         f.write(line + "\n")
 
 
 @click.command("log")
-@click.option("-n", "count", default=20, help="Number of entries to show.")
+@click.option("-n", "count", default=20, type=click.IntRange(min=1), help="Number of entries to show.")
 def log_cmd(count: int) -> None:
     """Show recent audit log entries."""
     if not os.path.exists(AUDIT_FILE):
