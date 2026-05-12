@@ -3,6 +3,7 @@
 
 import hashlib
 import os
+import shlex
 import subprocess
 import sys
 
@@ -16,6 +17,7 @@ from ozm.config import (
     add_blocked_command,
     command_name,
     disallowed_command_reason,
+    has_shell_metacharacters,
     is_command_allowed,
     is_command_blocked,
     project_key,
@@ -31,6 +33,25 @@ def _cmd_hash(command: str) -> str:
 
 def _scope_label(global_scope: bool) -> str:
     return "global" if global_scope else "project"
+
+
+def _run_command(argv: list[str]) -> subprocess.CompletedProcess:
+    return subprocess.run(argv)
+
+
+def _edited_argv(command: str) -> list[str]:
+    if has_shell_metacharacters(command):
+        raise click.ClickException(
+            "edited command contains shell syntax; use argv-style arguments or "
+            "put shell logic in a reviewed script"
+        )
+    try:
+        argv = shlex.split(command)
+    except ValueError as exc:
+        raise click.ClickException(f"edited command could not be parsed: {exc}") from exc
+    if not argv:
+        raise click.ClickException("edited command is empty")
+    return argv
 
 
 WRAPPERS = {"uv", "npx", "bunx", "poetry", "pipx", "run", "exec"}
@@ -102,7 +123,7 @@ def cmd_cmd(command_and_args: tuple[str, ...]) -> None:
         )
         sys.exit(1)
 
-    command = " ".join(args)
+    command = shlex.join(args)
     disallowed = disallowed_command_reason(command)
     if disallowed:
         audit_log("blocked", "cmd", command)
@@ -121,7 +142,7 @@ def cmd_cmd(command_and_args: tuple[str, ...]) -> None:
         if approval.approved is True:
             audit_log("override", "cmd", command, approval.feedback)
             click.echo("ozm: override granted (one-time)", err=True)
-            result = subprocess.run(command, shell=True)
+            result = _run_command(args)
             sys.exit(result.returncode)
         else:
             audit_log("denied", "cmd", command, approval.feedback)
@@ -131,7 +152,7 @@ def cmd_cmd(command_and_args: tuple[str, ...]) -> None:
     if is_command_allowed(command):
         audit_log("config", "cmd", command)
         click.echo("ozm: allowed (config)", err=True)
-        result = subprocess.run(command, shell=True)
+        result = _run_command(args)
         sys.exit(result.returncode)
 
     key = project_key(CMD_PREFIX + command)
@@ -141,13 +162,17 @@ def cmd_cmd(command_and_args: tuple[str, ...]) -> None:
     if hashes.get(key) == current_hash:
         audit_log("cached", "cmd", command)
         click.echo("ozm: allowed (cached)", err=True)
-        result = subprocess.run(command, shell=True)
+        result = _run_command(args)
         sys.exit(result.returncode)
 
     approval = request_cmd_approval(command, agent)
 
     if approval.approved is True:
         run_command = approval.command or command
+        run_args = args
+        if run_command != command:
+            run_args = _edited_argv(run_command)
+            run_command = shlex.join(run_args)
         run_disallowed = disallowed_command_reason(run_command)
         if run_disallowed:
             audit_log("blocked", "cmd", run_command)
@@ -187,7 +212,7 @@ def cmd_cmd(command_and_args: tuple[str, ...]) -> None:
             click.echo(f"ozm: approved cmd (edited)", err=True)
         else:
             click.echo(f"ozm: approved cmd", err=True)
-        result = subprocess.run(run_command, shell=True)
+        result = _run_command(run_args)
         sys.exit(result.returncode)
 
     if approval.approved is False:

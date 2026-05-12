@@ -15,13 +15,18 @@ import unicodedata
 
 import yaml
 
-SHELL_METACHARS = re.compile(r"[;|&$`\n()<>{}\[\]]")
+SHELL_METACHARS = frozenset(";|&$`\n()<>{}[]")
 
 SED_ALTERNATIVES = (
     "sed is disallowed because it can edit files in-place and cannot be safely "
     "blanket-approved. Use rg for searching, cat/nl/head/tail for viewing, or "
     "write a small reviewed script and run it with 'ozm run <script>' for "
     "transformations."
+)
+RG_PRE_REASON = (
+    "rg --pre is disallowed because it executes a preprocessor command. "
+    "Use rg without --pre, or put preprocessing in a reviewed script and run it "
+    "with 'ozm run <script>'."
 )
 DISALLOWED_COMMANDS = {
     "sed": SED_ALTERNATIVES,
@@ -33,19 +38,46 @@ def sanitize_command(command: str) -> str:
     return "".join(c for c in command if unicodedata.category(c) not in ("Cf", "Cc", "Mn") or c in ("\n", "\t"))
 
 
+def has_shell_metacharacters(command: str) -> bool:
+    quote = None
+    escaped = False
+    for ch in command:
+        if escaped:
+            escaped = False
+            continue
+        if ch == "\\" and quote != "'":
+            escaped = True
+            continue
+        if quote:
+            if ch == quote:
+                quote = None
+            elif quote == '"' and ch in "$`":
+                return True
+            continue
+        if ch in ("'", '"'):
+            quote = ch
+            continue
+        if ch in SHELL_METACHARS:
+            return True
+    return quote is not None
+
+
 def _is_env_assignment(token: str) -> bool:
     name, sep, _value = token.partition("=")
     return bool(sep and name and re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", name))
 
 
-def command_name(command: str) -> str:
+def command_parts(command: str) -> list[str]:
     command = sanitize_command(command)
     try:
-        parts = shlex.split(command)
+        return shlex.split(command)
     except ValueError:
-        parts = command.split()
+        return command.split()
+
+
+def _command_start_index(parts: list[str]) -> int | None:
     if not parts:
-        return ""
+        return None
 
     index = 0
     while index < len(parts) and _is_env_assignment(parts[index]):
@@ -68,12 +100,30 @@ def command_name(command: str) -> str:
                 continue
             break
     if index >= len(parts):
+        return None
+    return index
+
+
+def command_name(command: str) -> str:
+    parts = command_parts(command)
+    index = _command_start_index(parts)
+    if index is None:
         return ""
     return os.path.basename(parts[index])
 
 
 def disallowed_command_reason(command: str) -> str | None:
-    return DISALLOWED_COMMANDS.get(command_name(command))
+    parts = command_parts(command)
+    index = _command_start_index(parts)
+    if index is None:
+        return None
+    name = os.path.basename(parts[index])
+    if name in DISALLOWED_COMMANDS:
+        return DISALLOWED_COMMANDS[name]
+    args = parts[index + 1:]
+    if name == "rg" and any(arg == "--pre" or arg.startswith("--pre=") for arg in args):
+        return RG_PRE_REASON
+    return None
 
 
 OZM_DIR = os.path.expanduser("~/.ozm")
@@ -172,7 +222,7 @@ def is_command_allowed(command: str) -> bool:
     command = sanitize_command(command)
     if disallowed_command_reason(command):
         return False
-    if SHELL_METACHARS.search(command):
+    if has_shell_metacharacters(command):
         return False
     if is_command_blocked(command):
         return False

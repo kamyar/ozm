@@ -76,7 +76,7 @@ class CmdTests(unittest.TestCase):
             )
 
         self.assertEqual(result.exit_code, 0)
-        subprocess_mod.run.assert_called_once_with("rm -rf build", shell=True)
+        subprocess_mod.run.assert_called_once_with(["rm", "-rf", "build"])
         request_cmd_approval.assert_not_called()
 
 

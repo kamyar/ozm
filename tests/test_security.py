@@ -60,6 +60,41 @@ class TestH1MetacharRejection(unittest.TestCase):
     def test_angle_brackets_rejected(self):
         self.assertFalse(self._allow("echo foo > /etc/passwd"))
 
+    def test_quoted_regex_pipe_allowed(self):
+        with patch.object(config_mod, "load_project_config", return_value={
+            "allowed_commands": ["rg"],
+        }), patch.object(config_mod, "load_global_config", return_value={}):
+            result = config_mod.is_command_allowed(
+                "rg -n 'isolated_filesystem|HASH_FILE' tests src/ozm"
+            )
+
+        self.assertTrue(result)
+
+    def test_unquoted_regex_pipe_rejected(self):
+        with patch.object(config_mod, "load_project_config", return_value={
+            "allowed_commands": ["rg"],
+        }), patch.object(config_mod, "load_global_config", return_value={}):
+            result = config_mod.is_command_allowed(
+                "rg -n isolated_filesystem|HASH_FILE tests src/ozm"
+            )
+
+        self.assertFalse(result)
+
+    def test_double_quoted_substitution_rejected(self):
+        self.assertFalse(self._allow('echo "$(whoami)"'))
+
+
+class TestCommandSpecificRejection(unittest.TestCase):
+    """Command-specific dangerous flags must override broad allowlists."""
+
+    def test_rg_pre_rejected_even_with_bare_rg_allowlist(self):
+        with patch.object(config_mod, "load_project_config", return_value={
+            "allowed_commands": ["rg"],
+        }), patch.object(config_mod, "load_global_config", return_value={}):
+            result = config_mod.is_command_allowed("rg --pre sh pattern .")
+
+        self.assertFalse(result)
+
 
 class TestSedAllowlistRejection(unittest.TestCase):
     """sed must never be allowlisted because it can edit files in-place."""
@@ -192,6 +227,52 @@ class TestH2EditedCommandRecheck(unittest.TestCase):
         save_hashes.assert_not_called()
         mock_sub.run.assert_not_called()
 
+    def test_edited_to_shell_syntax_is_rejected(self):
+        completed = subprocess.CompletedProcess(args="echo ok | sh", returncode=0)
+
+        with patch.object(cmd_mod, "is_command_blocked", return_value=None), \
+             patch.object(cmd_mod, "is_command_allowed", return_value=False), \
+             patch.object(cmd_mod, "load_hashes", return_value={}), \
+             patch.object(cmd_mod, "save_hashes") as save_hashes, \
+             patch.object(cmd_mod, "request_cmd_approval", return_value=ApprovalResult(
+                 approved=True, command="echo ok | sh")), \
+             patch.object(cmd_mod, "subprocess") as mock_sub, \
+             patch.object(cmd_mod, "audit_log"):
+            mock_sub.run.return_value = completed
+            result = CliRunner().invoke(cmd_mod.cmd_cmd, [*META, "echo", "hello"])
+
+        self.assertNotEqual(result.exit_code, 0)
+        self.assertIn("shell syntax", result.output)
+        save_hashes.assert_not_called()
+        mock_sub.run.assert_not_called()
+
+    def test_edited_safe_command_runs_as_argv(self):
+        completed = subprocess.CompletedProcess(
+            args=["rg", "-n", "isolated_filesystem|HASH_FILE", "tests"],
+            returncode=0,
+        )
+
+        with patch.object(cmd_mod, "is_command_blocked", return_value=None), \
+             patch.object(cmd_mod, "is_command_allowed", return_value=False), \
+             patch.object(cmd_mod, "load_hashes", return_value={}), \
+             patch.object(cmd_mod, "save_hashes"), \
+             patch.object(cmd_mod, "request_cmd_approval", return_value=ApprovalResult(
+                 approved=True,
+                 command="rg -n 'isolated_filesystem|HASH_FILE' tests",
+             )), \
+             patch.object(cmd_mod, "subprocess") as mock_sub, \
+             patch.object(cmd_mod, "audit_log"):
+            mock_sub.run.return_value = completed
+            result = CliRunner().invoke(cmd_mod.cmd_cmd, [*META, "echo", "hello"])
+
+        self.assertEqual(result.exit_code, 0)
+        mock_sub.run.assert_called_once_with([
+            "rg",
+            "-n",
+            "isolated_filesystem|HASH_FILE",
+            "tests",
+        ])
+
     def test_edited_to_same_command_is_not_rechecked(self):
         completed = subprocess.CompletedProcess(args="echo hello", returncode=0)
 
@@ -256,6 +337,83 @@ class TestCommandRulePersistence(unittest.TestCase):
         self.assertEqual(result.exit_code, 0)
         add_allowed.assert_called_once_with("pytest tests", global_scope=True)
         self.assertIn("added global allowlist pattern", result.output)
+        mock_sub.run.assert_called_once_with(["pytest", "tests"])
+
+    def test_allowed_rg_regex_pipe_runs_without_shell_pipeline(self):
+        completed = subprocess.CompletedProcess(
+            args=["rg", "-n", "isolated_filesystem|HASH_FILE", "tests", "src/ozm"],
+            returncode=0,
+        )
+
+        with patch.object(config_mod, "load_project_config", return_value={}), \
+             patch.object(config_mod, "load_global_config", return_value={
+                 "allowed_commands": ["rg"],
+             }), \
+             patch.object(cmd_mod, "is_command_blocked", return_value=None), \
+             patch.object(cmd_mod, "subprocess") as mock_sub, \
+             patch.object(cmd_mod, "audit_log"):
+            mock_sub.run.return_value = completed
+            result = CliRunner().invoke(
+                cmd_mod.cmd_cmd,
+                [
+                    *META,
+                    "rg",
+                    "-n",
+                    "isolated_filesystem|HASH_FILE",
+                    "tests",
+                    "src/ozm",
+                ],
+            )
+
+        self.assertEqual(result.exit_code, 0)
+        mock_sub.run.assert_called_once_with([
+            "rg",
+            "-n",
+            "isolated_filesystem|HASH_FILE",
+            "tests",
+            "src/ozm",
+        ])
+
+    def test_cached_rg_regex_pipe_runs_without_shell_pipeline(self):
+        command = "rg -n 'isolated_filesystem|HASH_FILE' tests src/ozm"
+        completed = subprocess.CompletedProcess(
+            args=["rg", "-n", "isolated_filesystem|HASH_FILE", "tests", "src/ozm"],
+            returncode=0,
+        )
+
+        with patch.object(cmd_mod, "is_command_blocked", return_value=None), \
+             patch.object(cmd_mod, "is_command_allowed", return_value=False), \
+             patch.object(cmd_mod, "project_key", side_effect=lambda key: f"root\0{key}"), \
+             patch.object(
+                 cmd_mod,
+                 "load_hashes",
+                 return_value={
+                     f"root\0{cmd_mod.CMD_PREFIX}{command}": cmd_mod._cmd_hash(command),
+                 },
+             ), \
+             patch.object(cmd_mod, "subprocess") as mock_sub, \
+             patch.object(cmd_mod, "audit_log"):
+            mock_sub.run.return_value = completed
+            result = CliRunner().invoke(
+                cmd_mod.cmd_cmd,
+                [
+                    *META,
+                    "rg",
+                    "-n",
+                    "isolated_filesystem|HASH_FILE",
+                    "tests",
+                    "src/ozm",
+                ],
+            )
+
+        self.assertEqual(result.exit_code, 0)
+        mock_sub.run.assert_called_once_with([
+            "rg",
+            "-n",
+            "isolated_filesystem|HASH_FILE",
+            "tests",
+            "src/ozm",
+        ])
 
     def test_denied_global_block_pattern_is_saved_globally(self):
         with patch.object(cmd_mod, "is_command_blocked", return_value=None), \
