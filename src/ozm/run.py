@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Hash-based script execution gate."""
 
+import difflib
 import hashlib
 import os
 import stat
@@ -12,10 +13,16 @@ from ozm.agent import extract_agent_metadata
 from ozm.approve import request_approval
 from ozm.audit import log as audit_log
 from ozm.config import project_key
-from ozm.storage import load_yaml_no_follow, refuse_symlink, save_yaml_atomic_no_follow
+from ozm.storage import (
+    load_yaml_no_follow,
+    refuse_symlink,
+    save_bytes_atomic_no_follow,
+    save_yaml_atomic_no_follow,
+)
 
 OZM_DIR = os.path.expanduser("~/.ozm")
 HASH_FILE = os.path.join(OZM_DIR, "hashes.yaml")
+SNAPSHOTS_DIR = os.path.join(OZM_DIR, "snapshots")
 
 
 def _refuse_symlink(path: str, label: str) -> None:
@@ -52,6 +59,62 @@ def save_hashes(hashes: dict[str, str]) -> None:
         directory_label="approval cache directory",
         sort_keys=True,
     )
+
+
+def _snapshot_path(key: str) -> str:
+    slug = hashlib.sha256(key.encode()).hexdigest()
+    return os.path.join(SNAPSHOTS_DIR, slug)
+
+
+def save_snapshot(key: str, file_path: str) -> None:
+    _refuse_symlink(OZM_DIR, "snapshot directory")
+    _refuse_symlink(SNAPSHOTS_DIR, "snapshot directory")
+    dest = _snapshot_path(key)
+    _refuse_symlink(dest, "snapshot file")
+    with open(file_path, "rb") as f:
+        content = f.read()
+    save_bytes_atomic_no_follow(
+        dest,
+        content,
+        directory=SNAPSHOTS_DIR,
+        directory_label="snapshot directory",
+        parent_directory=OZM_DIR,
+        parent_label="snapshot directory",
+    )
+
+
+def load_snapshot(key: str) -> str | None:
+    path = _snapshot_path(key)
+    if not os.path.exists(path) or os.path.islink(path):
+        return None
+    try:
+        with open(path) as f:
+            return f.read()
+    except OSError:
+        return None
+
+
+def snapshot_diff(key: str, file_path: str) -> tuple[str | None, int, int]:
+    old_content = load_snapshot(key)
+    if old_content is None:
+        return None, 0, 0
+    try:
+        with open(file_path) as f:
+            new_content = f.read()
+    except OSError:
+        return None, 0, 0
+    old_lines = old_content.splitlines(keepends=True)
+    new_lines = new_content.splitlines(keepends=True)
+    diff_lines = list(difflib.unified_diff(
+        old_lines, new_lines,
+        fromfile=f"a/{os.path.basename(file_path)}",
+        tofile=f"b/{os.path.basename(file_path)}",
+    ))
+    if not diff_lines:
+        return None, 0, 0
+    added = sum(1 for l in diff_lines if l.startswith("+") and not l.startswith("+++"))
+    removed = sum(1 for l in diff_lines if l.startswith("-") and not l.startswith("---"))
+    return "".join(diff_lines), added, removed
 
 
 def show_file(path: str) -> None:
@@ -124,7 +187,11 @@ def run_cmd(items: tuple[str, ...]) -> None:
 
     label = "NEW" if stored_hash is None else "CHANGED"
 
-    approval = request_approval(script, label, agent)
+    snap_diff = None
+    if label == "CHANGED":
+        snap_diff, _, _ = snapshot_diff(key, abs_path)
+
+    approval = request_approval(script, label, agent, snapshot_diff=snap_diff)
 
     if approval.approved is True:
         hashes[key] = current_hash
@@ -135,6 +202,10 @@ def run_cmd(items: tuple[str, ...]) -> None:
             raise click.ClickException(
                 f"could not save approval cache: {exc}. The script was NOT executed."
             ) from exc
+        try:
+            save_snapshot(key, abs_path)
+        except (OSError, RuntimeError):
+            pass
         audit_log("clicked", "run", abs_path, approval.feedback)
         if approval.feedback:
             click.echo(f"ozm: approved {script} — {approval.feedback}", err=True)
@@ -184,12 +255,23 @@ def status_cmd() -> None:
         display = _display_key_target(root, target)
         if target.startswith("cmd:"):
             label = "ok"
+            suffix = ""
         elif os.path.exists(target):
             current = compute_hash(target)
-            label = "ok" if current == stored_hash else "CHANGED"
+            if current == stored_hash:
+                label = "ok"
+                suffix = ""
+            else:
+                label = "CHANGED"
+                _, added, removed = snapshot_diff(key, target)
+                if added or removed:
+                    suffix = f"  +{added} -{removed}"
+                else:
+                    suffix = ""
         else:
             label = "MISSING"
-        click.echo(f"  [{label:>7}] {display}")
+            suffix = ""
+        click.echo(f"  [{label:>7}] {display}{suffix}")
 
 
 @click.command("reset")
