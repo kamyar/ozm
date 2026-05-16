@@ -49,9 +49,17 @@ def _get_git_diff(path: str) -> str | None:
     return None
 
 
-def request_approval(script: str, label: str, agent: AgentMetadata) -> ApprovalResult:
+def request_approval(
+    script: str,
+    label: str,
+    agent: AgentMetadata,
+    *,
+    snapshot_diff: str | None = None,
+) -> ApprovalResult:
     """Ask the user to review and approve a script via OS-native UI."""
     diff = _get_git_diff(script) if label == "CHANGED" else None
+    if diff is None and snapshot_diff is not None:
+        diff = snapshot_diff
     if platform.system() == "Darwin":
         return _approve_file_macos(script, label, agent, diff=diff)
     return ApprovalResult(approved=None)
