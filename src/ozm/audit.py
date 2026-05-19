@@ -18,7 +18,7 @@ def _one_line(value: str) -> str:
 def log(action: str, kind: str, target: str, feedback: str | None = None) -> None:
     """Append an entry to the audit log.
 
-    action: "clicked", "cached", "config", "denied", "blocked", "no-dialog"
+    action: "clicked", "cached", "config", "semantic", "denied", "blocked", "no-dialog"
     kind: "run", "cmd"
     target: the script path or command string
     """

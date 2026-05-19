@@ -22,6 +22,7 @@ from ozm.config import (
     is_command_blocked,
     project_key,
 )
+from ozm.github_graphql import read_only_reason as github_graphql_read_only_reason
 from ozm.run import load_hashes, save_hashes
 
 CMD_PREFIX = "cmd:"
@@ -154,6 +155,13 @@ def cmd_cmd(command_and_args: tuple[str, ...]) -> None:
             audit_log("denied", "cmd", command, approval.feedback)
             click.echo("ozm: override denied", err=True)
             sys.exit(1)
+
+    semantic_reason = github_graphql_read_only_reason(args)
+    if semantic_reason:
+        audit_log("semantic", "cmd", command, semantic_reason)
+        click.echo(f"ozm: allowed ({semantic_reason})", err=True)
+        result = _run_command(args)
+        sys.exit(result.returncode)
 
     try:
         allowed = is_command_allowed(command)
