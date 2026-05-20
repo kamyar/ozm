@@ -147,6 +147,48 @@ class TestGlobalCommandConfig(unittest.TestCase):
 
         self.assertTrue(result)
 
+    def test_global_literal_subcommand_allowlist_allows_arguments(self):
+        with patch.object(config_mod, "load_project_config", return_value={}), \
+             patch.object(config_mod, "load_global_config", return_value={
+                 "allowed_commands": ["gh issue view"],
+             }):
+            result = config_mod.is_command_allowed(
+                "gh issue view 42 --repo example/widgets --json title,state"
+            )
+
+        self.assertTrue(result)
+
+    def test_literal_subcommand_allowlist_uses_token_boundary(self):
+        with patch.object(config_mod, "load_project_config", return_value={}), \
+             patch.object(config_mod, "load_global_config", return_value={
+                 "allowed_commands": ["gh issue view"],
+             }):
+            result = config_mod.is_command_allowed("gh issue viewer 42")
+
+        self.assertFalse(result)
+
+    def test_literal_exact_command_allowlist_stays_exact(self):
+        with patch.object(config_mod, "load_project_config", return_value={}), \
+             patch.object(config_mod, "load_global_config", return_value={
+                 "allowed_commands": ["pytest tests"],
+             }):
+            exact = config_mod.is_command_allowed("pytest tests")
+            with_args = config_mod.is_command_allowed("pytest tests -v")
+
+        self.assertTrue(exact)
+        self.assertFalse(with_args)
+
+    def test_non_read_only_gh_subcommand_allowlist_stays_exact(self):
+        with patch.object(config_mod, "load_project_config", return_value={}), \
+             patch.object(config_mod, "load_global_config", return_value={
+                 "allowed_commands": ["gh issue edit"],
+             }):
+            exact = config_mod.is_command_allowed("gh issue edit")
+            with_args = config_mod.is_command_allowed("gh issue edit 42 --title updated")
+
+        self.assertTrue(exact)
+        self.assertFalse(with_args)
+
     def test_project_block_overrides_global_allow(self):
         with patch.object(config_mod, "load_project_config", return_value={
             "blocked_commands": ["pytest tests/private*"],
