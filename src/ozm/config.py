@@ -32,6 +32,16 @@ DISALLOWED_COMMANDS = {
     "sed": SED_ALTERNATIVES,
     "gsed": SED_ALTERNATIVES,
 }
+READ_ONLY_GH_PREFIX_RULES = {
+    "gh issue list",
+    "gh issue view",
+    "gh pr diff",
+    "gh pr list",
+    "gh pr view",
+    "gh run list",
+    "gh run view",
+    "gh run watch",
+}
 
 
 def sanitize_command(command: str) -> str:
@@ -236,6 +246,14 @@ def _command_configs() -> list[dict]:
     return [load_project_config(), load_global_config()]
 
 
+def _pattern_matches_command(command: str, first_word: str, pattern: str) -> bool:
+    if fnmatch.fnmatch(command, pattern) or fnmatch.fnmatch(first_word, pattern):
+        return True
+    if pattern in READ_ONLY_GH_PREFIX_RULES:
+        return command.startswith(pattern + " ")
+    return False
+
+
 def _matching_pattern(command: str, key: str) -> str | None:
     first_word = command.split()[0] if command.strip() else ""
     for config in _command_configs():
@@ -245,7 +263,7 @@ def _matching_pattern(command: str, key: str) -> str | None:
         for pattern in patterns:
             if not isinstance(pattern, str):
                 continue
-            if fnmatch.fnmatch(command, pattern) or fnmatch.fnmatch(first_word, pattern):
+            if _pattern_matches_command(command, first_word, pattern):
                 return pattern
     return None
 

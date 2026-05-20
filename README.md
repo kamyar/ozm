@@ -104,6 +104,7 @@ Configuration is optional. Without it, every command goes through the approval d
 ```yaml
 allowed_commands:
   - pytest
+  - "gh issue view"
   - "uv pip install *"
   - "docker compose *"
 

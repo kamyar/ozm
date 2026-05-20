@@ -32,7 +32,8 @@ A list of glob patterns. Commands matching any pattern skip the approval dialog 
 
 ```yaml
 allowed_commands:
-  - pytest                    # exact match
+  - pytest                    # pytest with or without args
+  - "gh issue view"           # gh issue view with or without args
   - "uv pip install *"       # any uv pip install command
   - "docker compose *"       # any docker compose subcommand
   - "curl httpbin.org/*"     # specific domain only
@@ -42,11 +43,13 @@ allowed_commands:
 >
 > `sed` and `gsed` are never matched by `allowed_commands`, because they can edit files in-place and cannot be safely blanket-approved. Use `rg` for searching, `cat`/`nl`/`head`/`tail` for viewing, or `ozm run <script>` for transformations.
 
-Patterns are matched against both the full command string and the first word (the binary name). Uses Python's `fnmatch` glob syntax:
+Patterns are matched against the full command string and the first word (the binary name). Recognized read-only GitHub command families (`gh issue view`, `gh issue list`, `gh pr view`, `gh pr list`, `gh pr diff`, `gh run view`, `gh run list`, and `gh run watch`) also match the same token prefix followed by arguments. For example, `gh issue view` covers `gh issue view 123 --repo owner/repo` but not `gh issue viewer 123`. Glob patterns use Python's `fnmatch` syntax:
 
 | Pattern | Matches |
 |---------|---------|
-| `pytest` | `pytest` only |
+| `pytest` | `pytest`, `pytest -v`, `pytest tests/` |
+| `gh issue view` | `gh issue view`, `gh issue view 123 --repo owner/repo` |
+| `pytest tests` | `pytest tests` only |
 | `pytest *` | `pytest -v`, `pytest tests/`, etc. |
 | `uv pip install *` | `uv pip install requests`, `uv pip install -e .`, etc. |
 | `curl httpbin.org/*` | `curl httpbin.org/get`, `curl httpbin.org/post` |
@@ -72,7 +75,7 @@ Global and project blocklists are checked before all allowlists. If a command ma
 ```yaml
 allowed_commands:
   - pytest
-  - "gh pr view *"
+  - "gh pr view"
 
 blocked_commands:
   - "curl * | sh"
