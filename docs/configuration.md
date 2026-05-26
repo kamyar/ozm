@@ -41,7 +41,7 @@ allowed_commands:
 
 > **Security note:** Avoid patterns like `"uv run *"`, `"python *"`, or `"uv *"` — these bypass content review for script files. Use `ozm run` for scripts instead, which gates on file content hash.
 >
-> `sed` and `gsed` are never matched by `allowed_commands`, because they can edit files in-place and cannot be safely blanket-approved. Use `rg` for searching, `cat`/`nl`/`head`/`tail` for viewing, or `ozm run <script>` for transformations.
+> `sed`, `gsed`, and `rg --pre` are never matched by `allowed_commands`, because they can edit files in-place or execute hidden preprocessing. Use `rg` without `--pre` for searching, `cat`/`nl`/`head`/`tail` for viewing, or `ozm run <script>` for transformations.
 
 Patterns are matched against the full command string and the first word (the binary name). Recognized read-only GitHub command families (`gh issue view`, `gh issue list`, `gh pr view`, `gh pr list`, `gh pr diff`, `gh run view`, `gh run list`, and `gh run watch`) also match the same token prefix followed by arguments. For example, `gh issue view` covers `gh issue view 123 --repo owner/repo` but not `gh issue viewer 123`. Glob patterns use Python's `fnmatch` syntax:
 
@@ -56,7 +56,7 @@ Patterns are matched against the full command string and the first word (the bin
 
 ### blocked_commands
 
-A list of glob patterns. Commands matching any pattern are denied immediately — no dialog, no override.
+A list of glob patterns. Commands matching any pattern are denied by default. If the agent includes `--reason "justification"` on a config-blocked `ozm cmd` invocation, ozm shows a one-time override dialog; an approved override runs once, is logged, and does not update caches or allowlists.
 
 ```yaml
 blocked_commands:
@@ -66,7 +66,7 @@ blocked_commands:
   - "chmod 777 *"
 ```
 
-Global and project blocklists are checked before all allowlists. If a command matches both, it is blocked.
+Global and project blocklists are checked before all allowlists. If a command matches both, it is blocked unless the user explicitly grants a one-time override.
 
 ### Global command rules
 
@@ -107,9 +107,14 @@ commit:
 ```mermaid
 flowchart TD
     A[Command received] --> B{Matches global/project blocked_commands?}
-    B -->|Yes| C[Blocked immediately]
-    B -->|No| D{Matches global/project allowed_commands?}
-    D -->|Yes| E[Run immediately]
+    B -->|Yes, no reason| C[Blocked]
+    B -->|Yes + reason| O[Show one-time override dialog]
+    O -->|Allow once| E[Run immediately]
+    O -->|Deny| C
+    B -->|No| S{Known semantic read-only command?}
+    S -->|Yes| E
+    S -->|No| D{Matches global/project allowed_commands?}
+    D -->|Yes| E
     D -->|No| F{Hash cached from prior approval?}
     F -->|Yes| E
     F -->|No| G[Show approval dialog]
@@ -122,6 +127,7 @@ flowchart TD
 | `config.yaml` | Global command allowlists and blocklists |
 | `projects/<name>-<hash>.yaml` | Per-project config (allowlists, blocklists, commit rules) |
 | `hashes.yaml` | Project-scoped SHA-256 hashes of approved scripts and commands |
+| `snapshots/` | Last-approved script contents used for changed-script diffs |
 | `audit.log` | Append-only log of all approvals, denials, and blocks |
 | `hooks/enforce.sh` | The PreToolUse hook script installed by `ozm install` |
 
@@ -152,4 +158,4 @@ Plain text, one entry per line:
 
 Fields: `timestamp  action  type  working_directory  target  [# feedback]`
 
-Actions: `clicked` (user approved in dialog), `cached` (hash matched prior approval), `config` (matched allowlist), `denied` (user denied in dialog), `blocked` (matched blocklist), `no-dialog` (dialog could not be shown, command blocked)
+Actions: `clicked` (user approved in dialog), `cached` (hash matched prior approval), `config` (matched allowlist), `semantic` (built-in read-only classifier), `override` (user-approved one-time override), `denied` (user denied in dialog), `blocked` (matched blocklist), `error`, `no-dialog` (dialog could not be shown, command blocked)
