@@ -60,7 +60,7 @@ flowchart TD
 
 ## ozm cmd
 
-Run an arbitrary shell command after approval. The command string is hashed — approve once and it runs without prompting until you reset.
+Run an arbitrary argv-style command after approval. The command string is hashed — approve once and it runs without prompting until you reset.
 
 ```
 ozm cmd --agent-name "<work>" --agent-description "<one-line intent>" <command> [args...]
@@ -90,14 +90,18 @@ ozm: use 'ozm run --agent-name "Run script" --agent-description "Try to execute 
 
 **Agent metadata:** `--agent-name` is the short work name shown in the dialog. `--agent-description` must be exactly one line describing what the agent is trying to do. Missing, empty, multiline, or overlong metadata is rejected before execution, with an instruction for the agent to write the requirement to memory before retrying.
 
-**Disallowed commands:** `sed` and `gsed` are blocked even when they appear in `allowed_commands`, because they can edit files in-place and are not safe to blanket approve. Use `rg` for searching, `cat`/`nl`/`head`/`tail` for viewing, or write a small reviewed script and run it with `ozm run <script>` for transformations.
+**Disallowed commands:** `sed`, `gsed`, and `rg --pre` are blocked even when they appear in `allowed_commands`, because they can edit files in-place or execute hidden preprocessing. Use `rg` without `--pre` for searching, `cat`/`nl`/`head`/`tail` for viewing, or write a small reviewed script and run it with `ozm run <script>` for transformations.
+
+**Read-only GitHub GraphQL:** `gh api graphql -f query=...` requests are auto-allowed when ozm can prove the selected operation is a query. Mutations, file-backed queries, malformed documents, and ambiguous multi-operation requests still go through normal approval.
 
 **Approval order:**
 
-1. Blocked by global or project `blocked_commands`? Deny immediately.
-2. Matches global or project `allowed_commands`? Run immediately.
-3. Hash matches a previous approval? Run immediately.
-4. Otherwise, show approval dialog.
+1. Hard-disallowed command family? Deny immediately.
+2. Blocked by global or project `blocked_commands`? Deny, or show a one-time override dialog if `--reason "..."` is present.
+3. Known semantic read-only command? Run immediately.
+4. Matches global or project `allowed_commands`? Run immediately.
+5. Hash matches a previous approval? Run immediately.
+6. Otherwise, show approval dialog.
 
 ### Flow
 
@@ -108,9 +112,14 @@ flowchart TD
     Z -->|Yes| B{Script file detected?}
     B -->|Yes| C[Suggest ozm run, exit]
     B -->|No| D{Blocked pattern?}
-    D -->|Yes| E[Deny, log]
-    D -->|No| F{Allowed pattern?}
-    F -->|Yes| G[Execute, log]
+    D -->|Yes, no reason| E[Deny, log]
+    D -->|Yes + reason| O[Show override dialog]
+    O -->|Allow once| G[Execute, log]
+    O -->|Deny| E
+    D -->|No| S{Semantic read-only?}
+    S -->|Yes| G
+    S -->|No| F{Allowed pattern?}
+    F -->|Yes| G
     F -->|No| H{Hash cached?}
     H -->|Yes| G
     H -->|No| I[Show approval dialog]
@@ -172,6 +181,8 @@ $ ozm git --agent-name "Inspect branches" --agent-description "List available br
 - `require_branch: true` — prevents commits directly on main/master
 - `branch_prefixes: ["user/", "feat/", "fix/"]` — requires branch names to start with a listed prefix
 
+**One-time overrides:** add `--reason "justification"` to a blocked `ozm git` or config-blocked `ozm cmd` operation to ask the user for a one-time approval. Approved overrides are logged, but they are not cached and do not change allowlists.
+
 ---
 
 ## ozm install
@@ -192,7 +203,7 @@ ozm: installing...
 ozm: done
 ```
 
-This writes the enforcement hook script and configures Claude Code to use it. The hook applies to all projects.
+This writes the enforcement hook script and configures Claude Code and Codex to use it. The hook applies to all projects.
 
 **With project docs:**
 
@@ -278,7 +289,7 @@ $ ozm log -n 5
 2026-04-26 10:18:30  config     cmd  /Users/you/project  docker compose up
 ```
 
-Actions: `clicked` (user approved), `cached` (hash matched), `config` (allowlist match), `denied`, `blocked`, `no-dialog` (GUI unavailable, command blocked).
+Actions: `clicked` (user approved), `cached` (hash matched), `config` (allowlist match), `semantic` (built-in read-only classifier), `override` (user-approved one-time override), `denied`, `blocked`, `error`, `no-dialog` (GUI unavailable, command blocked).
 
 The `# comment` at the end is the user's feedback from the approval dialog.
 
@@ -336,3 +347,23 @@ ozm: copied /Users/you/new-project/.ozm.yaml -> /Users/you/.ozm/projects/new-pro
 **Why this matters:** An agent (or a cloned repo) can edit `.ozm.yaml` freely, but the changes have no effect until a human explicitly runs `ozm trust`. This prevents a repo from silently adding allowlist entries.
 
 **Optional:** ozm works without any config — all commands simply go through the approval dialog or hash cache. Config is only needed to pre-approve or block specific patterns.
+
+---
+
+## ozm config
+
+Show the current project root, trusted project config path, global config path, and whether the trusted project config exists.
+
+```
+ozm config
+```
+
+**Example:**
+
+```bash
+$ ozm config
+project: /Users/you/new-project
+config:  /Users/you/.ozm/projects/new-project-a1b2c3d4e5f6g7h8.yaml
+global:  /Users/you/.ozm/config.yaml
+status:  exists
+```
