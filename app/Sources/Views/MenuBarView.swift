@@ -3,6 +3,7 @@ import SwiftUI
 struct MenuBarView: View {
     @ObservedObject var queue: ApprovalQueue
     @ObservedObject var server: SocketServer
+    var windowManager: ApprovalWindowManager? = nil
 
     var body: some View {
         VStack(spacing: 0) {
@@ -60,7 +61,18 @@ struct MenuBarView: View {
         ScrollView {
             LazyVStack(spacing: 1) {
                 ForEach(queue.pending) { item in
-                    ApprovalRow(item: item, queue: queue)
+                    HStack(spacing: 0) {
+                        ApprovalRow(item: item, queue: queue)
+                        Button {
+                            windowManager?.open(item: item, queue: queue)
+                        } label: {
+                            Image(systemName: "arrow.up.forward.square")
+                                .font(.callout)
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.trailing, 8)
+                        .help("Open in window")
+                    }
                 }
             }
         }
