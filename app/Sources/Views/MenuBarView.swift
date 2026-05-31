@@ -58,25 +58,67 @@ struct MenuBarView: View {
     }
 
     private var approvalList: some View {
-        ScrollView {
-            LazyVStack(spacing: 1) {
-                ForEach(queue.pending) { item in
-                    HStack(spacing: 0) {
-                        ApprovalRow(item: item, queue: queue)
+        VStack(spacing: 1) {
+            ForEach(queue.pending) { item in
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 8) {
+                        Image(systemName: typeIcon(for: item.request.type))
+                            .foregroundStyle(item.request.type == .override ? .red : .blue)
+                            .frame(width: 20)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(item.request.agent.name)
+                                .font(.callout.weight(.medium))
+                                .lineLimit(1)
+                            Text(item.request.payload.command ?? item.request.payload.script ?? item.request.agent.description)
+                                .font(.system(.caption, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                        Spacer()
+                    }
+                    HStack(spacing: 6) {
+                        Spacer()
                         Button {
                             windowManager?.open(item: item, queue: queue)
                         } label: {
                             Image(systemName: "arrow.up.forward.square")
-                                .font(.callout)
                         }
-                        .buttonStyle(.plain)
-                        .padding(.trailing, 8)
+                        .buttonStyle(.borderless)
                         .help("Open in window")
+
+                        Button("Deny") {
+                            queue.respond(to: item.id, with: ApprovalResponse(
+                                id: item.request.id,
+                                decision: .deny
+                            ))
+                        }
+                        .controlSize(.small)
+
+                        Button(item.request.type == .override ? "Allow Once" : "Allow") {
+                            queue.respond(to: item.id, with: ApprovalResponse(
+                                id: item.request.id,
+                                decision: .allow,
+                                command: item.request.payload.command
+                            ))
+                        }
+                        .controlSize(.small)
+                        .buttonStyle(.borderedProminent)
                     }
                 }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(Color(nsColor: .controlBackgroundColor))
             }
         }
-        .frame(maxHeight: 400)
+    }
+
+    private func typeIcon(for type: ApprovalRequest.RequestType) -> String {
+        switch type {
+        case .fileApproval: "doc.text"
+        case .cmdApproval: "terminal"
+        case .override: "exclamationmark.shield"
+        case .status: "info.circle"
+        }
     }
 
     private var footer: some View {
