@@ -12,6 +12,7 @@ final class ApprovalQueue: ObservableObject {
 
     @Published var pending: [PendingApproval] = []
     @Published var isDND: Bool = false
+    var windowManager: ApprovalWindowManager?
 
     var pendingCount: Int { pending.count }
 
@@ -27,7 +28,7 @@ final class ApprovalQueue: ObservableObject {
         )
         pending.append(item)
         if !isDND {
-            NSApp.activate()
+            windowManager?.open(item: item, queue: self)
         }
     }
 

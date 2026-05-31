@@ -5,12 +5,15 @@ import SwiftUI
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let queue = ApprovalQueue()
     let server = SocketServer()
+    let windowManager = ApprovalWindowManager()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        queue.windowManager = windowManager
         server.start(queue: queue)
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        windowManager.closeAll()
         server.stop()
     }
 }
@@ -21,7 +24,7 @@ struct OzmApp: App {
 
     var body: some Scene {
         MenuBarExtra {
-            MenuBarView(queue: delegate.queue, server: delegate.server)
+            MenuBarView(queue: delegate.queue, server: delegate.server, windowManager: delegate.windowManager)
         } label: {
             HStack(spacing: 2) {
                 Image(systemName: "shield.checkered")
