@@ -27,12 +27,11 @@ final class ApprovalWindowManager: ObservableObject {
         )
         window.title = "ozm — \(item.request.agent.name)"
         window.contentView = hostingView
-        window.isFloatingPanel = true
-        window.level = .floating
+        window.isFloatingPanel = false
+        window.level = .normal
         window.center()
         window.isReleasedWhenClosed = false
         window.makeKeyAndOrderFront(nil)
-        NSApp.activate()
 
         windows[item.id] = window
     }
@@ -148,14 +147,13 @@ struct ApprovalWindowContent: View {
                 .foregroundStyle(.secondary)
             }
 
+            let isDiff = item.request.payload.diff != nil
             let displayText = item.request.payload.diff ?? item.request.payload.content ?? ""
-            Text(displayText)
-                .font(.system(size: 11, design: .monospaced))
+            ColoredCodeView(text: displayText, isDiff: isDiff)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(8)
                 .background(Color(nsColor: .textBackgroundColor))
                 .clipShape(RoundedRectangle(cornerRadius: 6))
-                .textSelection(.enabled)
         }
     }
 
@@ -258,5 +256,52 @@ struct ApprovalWindowContent: View {
             applyGlobally: applyGlobally
         ))
         onDismiss()
+    }
+}
+
+struct ColoredCodeView: View {
+    let text: String
+    let isDiff: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(text.components(separatedBy: "\n").enumerated()), id: \.offset) { _, line in
+                Text(line)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(colorForLine(line))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 0.5)
+                    .background(backgroundForLine(line))
+            }
+        }
+        .textSelection(.enabled)
+    }
+
+    private func colorForLine(_ line: String) -> Color {
+        guard isDiff else { return .primary }
+        if line.hasPrefix("+++") || line.hasPrefix("---") {
+            return .secondary
+        }
+        if line.hasPrefix("+") {
+            return Color(.systemGreen)
+        }
+        if line.hasPrefix("-") {
+            return Color(.systemRed)
+        }
+        if line.hasPrefix("@@") {
+            return Color(.systemBlue)
+        }
+        return .primary
+    }
+
+    private func backgroundForLine(_ line: String) -> Color {
+        guard isDiff else { return .clear }
+        if line.hasPrefix("+") && !line.hasPrefix("+++") {
+            return Color(.systemGreen).opacity(0.08)
+        }
+        if line.hasPrefix("-") && !line.hasPrefix("---") {
+            return Color(.systemRed).opacity(0.08)
+        }
+        return .clear
     }
 }
