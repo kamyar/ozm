@@ -1,10 +1,14 @@
+import json
 import os
+import socket
 import stat
 import subprocess
+import threading
 import unittest
 from unittest.mock import patch
 
 from ozm import approve as approve_mod
+from ozm import socket_client
 from ozm.agent import AgentMetadata
 
 
@@ -196,6 +200,148 @@ class CommandApprovalParserTests(unittest.TestCase):
                 self.assertIsNone(parsed.allow_pattern)
                 self.assertIsNone(parsed.block_pattern)
                 self.assertFalse(parsed.apply_globally)
+
+
+class SocketClientTests(unittest.TestCase):
+    def test_returns_none_when_socket_missing(self):
+        with patch.object(socket_client, "SOCKET_PATH", "/tmp/ozm-test-nonexistent.sock"):
+            result = socket_client.send_request({"version": 1, "type": "status"})
+
+        self.assertIsNone(result)
+
+    def test_roundtrip_with_real_socket(self):
+        sock_path = f"/tmp/ozm-test-{os.getpid()}.sock"
+        self.addCleanup(lambda: os.path.exists(sock_path) and os.unlink(sock_path))
+
+        response = {"version": 1, "id": "abc", "decision": "allow", "feedback": "ok"}
+
+        def serve():
+            srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            srv.bind(sock_path)
+            srv.listen(1)
+            conn, _ = srv.accept()
+            data = b""
+            while b"\n" not in data:
+                data += conn.recv(4096)
+            conn.sendall(json.dumps(response).encode() + b"\n")
+            conn.close()
+            srv.close()
+
+        server = threading.Thread(target=serve, daemon=True)
+        server.start()
+        import time
+        time.sleep(0.05)
+
+        with patch.object(socket_client, "SOCKET_PATH", sock_path):
+            result = socket_client.send_request({"version": 1, "type": "cmd_approval"})
+
+        self.assertEqual(result, response)
+        server.join(timeout=1)
+
+    def test_returns_none_on_connection_refused(self):
+        sock_path = f"/tmp/ozm-test-{os.getpid()}.sock"
+        srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        srv.bind(sock_path)
+        srv.close()
+        self.addCleanup(lambda: os.path.exists(sock_path) and os.unlink(sock_path))
+
+        with patch.object(socket_client, "SOCKET_PATH", sock_path):
+            result = socket_client.send_request({"version": 1, "type": "status"})
+
+        self.assertIsNone(result)
+
+
+class SocketFallbackTests(unittest.TestCase):
+    def test_request_approval_falls_back_when_socket_unavailable(self):
+        agent = AgentMetadata("test", "test description")
+        fake_result = approve_mod.ApprovalResult(approved=True, feedback="ok")
+
+        with patch.object(approve_mod, "_try_socket_file", return_value=None), \
+            patch.object(approve_mod, "_approve_file_macos", return_value=fake_result) as mock_macos, \
+            patch.object(approve_mod.platform, "system", return_value="Darwin"), \
+            patch.object(approve_mod, "_get_git_diff", return_value=None):
+            result = approve_mod.request_approval("test.py", "NEW", agent)
+
+        self.assertIs(result.approved, True)
+        mock_macos.assert_called_once()
+
+    def test_request_approval_uses_socket_when_available(self):
+        agent = AgentMetadata("test", "test description")
+        socket_result = approve_mod.ApprovalResult(approved=True, feedback="via socket")
+
+        with patch.object(approve_mod, "_try_socket_file", return_value=socket_result), \
+            patch.object(approve_mod, "_approve_file_macos") as mock_macos, \
+            patch.object(approve_mod, "_get_git_diff", return_value=None):
+            result = approve_mod.request_approval("test.py", "NEW", agent)
+
+        self.assertEqual(result.feedback, "via socket")
+        mock_macos.assert_not_called()
+
+    def test_request_cmd_uses_socket_when_available(self):
+        agent = AgentMetadata("test", "test description")
+        socket_result = approve_mod.ApprovalResult(
+            approved=True, feedback="socket", command="echo hi",
+        )
+
+        with patch.object(approve_mod, "_try_socket_cmd", return_value=socket_result), \
+            patch.object(approve_mod, "_approve_cmd_macos") as mock_macos:
+            result = approve_mod.request_cmd_approval("echo hi", agent)
+
+        self.assertEqual(result.command, "echo hi")
+        mock_macos.assert_not_called()
+
+    def test_request_override_falls_back_when_socket_unavailable(self):
+        agent = AgentMetadata("test", "test description")
+        fake_result = approve_mod.ApprovalResult(approved=False, feedback="denied")
+
+        with patch.object(approve_mod, "_try_socket_override", return_value=None), \
+            patch.object(approve_mod, "_override_macos", return_value=fake_result) as mock_macos, \
+            patch.object(approve_mod.platform, "system", return_value="Darwin"):
+            result = approve_mod.request_override("git push -f", "force push", "hotfix", agent)
+
+        self.assertIs(result.approved, False)
+        mock_macos.assert_called_once()
+
+
+class ParseSocketResponseTests(unittest.TestCase):
+    def test_allow_response(self):
+        resp = {"decision": "allow", "feedback": "looks good", "command": None}
+        result = approve_mod._parse_socket_response(resp)
+
+        self.assertIs(result.approved, True)
+        self.assertEqual(result.feedback, "looks good")
+
+    def test_deny_response(self):
+        resp = {"decision": "deny", "feedback": "too risky"}
+        result = approve_mod._parse_socket_response(resp)
+
+        self.assertIs(result.approved, False)
+        self.assertEqual(result.feedback, "too risky")
+
+    def test_error_response_returns_none(self):
+        resp = {"decision": "error", "feedback": "internal error"}
+        result = approve_mod._parse_socket_response(resp)
+
+        self.assertIsNone(result)
+
+    def test_none_response_returns_none(self):
+        result = approve_mod._parse_socket_response(None)
+        self.assertIsNone(result)
+
+    def test_cmd_approval_with_pattern(self):
+        resp = {
+            "decision": "allow",
+            "feedback": None,
+            "command": "curl example.com",
+            "allow_pattern": "curl example.com/*",
+            "apply_globally": True,
+        }
+        result = approve_mod._parse_socket_response(resp)
+
+        self.assertIs(result.approved, True)
+        self.assertEqual(result.command, "curl example.com")
+        self.assertEqual(result.allow_pattern, "curl example.com/*")
+        self.assertTrue(result.apply_globally)
 
 
 if __name__ == "__main__":
