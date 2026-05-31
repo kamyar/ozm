@@ -58,19 +58,51 @@ def _edited_argv(command: str) -> list[str]:
 WRAPPERS = {"uv", "npx", "bunx", "poetry", "pipx", "run", "exec"}
 INTERPRETERS = {"python", "python3", "bash", "sh", "zsh", "node", "ruby", "perl"}
 
+EXTENSION_SHEBANGS = {
+    ".py": "#!/usr/bin/env python3",
+    ".sh": "#!/usr/bin/env bash",
+    ".rb": "#!/usr/bin/env ruby",
+    ".pl": "#!/usr/bin/env perl",
+    ".js": "#!/usr/bin/env node",
+}
+
+
+def _detect_inline_code(args: tuple[str, ...]) -> str | None:
+    """Return interpreter name if args look like inline code (e.g. python -c 'code')."""
+    interpreter = None
+    for arg in args:
+        if arg in WRAPPERS:
+            continue
+        if not interpreter and arg in INTERPRETERS:
+            interpreter = arg
+            continue
+        if interpreter and arg == "-c":
+            return interpreter
+        if not arg.startswith("-"):
+            return None
+    return None
+
 
 def _find_script_in_args(args: tuple[str, ...]) -> tuple[str, str] | None:
     """Return (script_path, suggested_shebang) if args look like script execution."""
     interpreter = None
+    saw_wrapper = False
     for arg in args:
         if arg.startswith("-"):
+            if interpreter and arg == "-m":
+                return None
             continue
         if arg in WRAPPERS:
+            saw_wrapper = True
             continue
         _, ext = os.path.splitext(arg)
-        if ext and os.path.isfile(arg) and interpreter:
-            shebang = f"#!/usr/bin/env {interpreter}"
-            return arg, shebang
+        if ext and os.path.isfile(arg):
+            if interpreter:
+                shebang = f"#!/usr/bin/env {interpreter}"
+                return arg, shebang
+            inferred = EXTENSION_SHEBANGS.get(ext)
+            if saw_wrapper and inferred:
+                return arg, inferred
         if not interpreter and "/" not in arg and arg in INTERPRETERS:
             interpreter = arg
     return None
@@ -101,6 +133,18 @@ def cmd_cmd(command_and_args: tuple[str, ...]) -> None:
             reason = a.split("=", 1)[1]
             args.pop(i)
             break
+
+    inline = _detect_inline_code(tuple(args))
+    if inline:
+        shebang = f"#!/usr/bin/env {inline}"
+        click.echo(
+            f"ozm: write the code to a script file with a shebang ({shebang}) "
+            f"and use 'ozm run --agent-name \"{agent.name}\" "
+            f"--agent-description \"{agent.description}\" <script>' "
+            f"instead of '{inline} -c'",
+            err=True,
+        )
+        sys.exit(1)
 
     match = _find_script_in_args(tuple(args))
     if match:
