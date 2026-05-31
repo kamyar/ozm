@@ -19,20 +19,20 @@ final class ApprovalWindowManager: ObservableObject {
         let hostingView = NSHostingView(rootView: view)
         hostingView.frame = NSRect(x: 0, y: 0, width: 560, height: 480)
 
-        let window = NSPanel(
+        let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 560, height: 480),
-            styleMask: [.titled, .closable, .resizable, .utilityWindow, .nonactivatingPanel],
+            styleMask: [.titled, .closable, .resizable],
             backing: .buffered,
             defer: false
         )
         window.title = "ozm — \(item.request.agent.name)"
         window.contentView = hostingView
-        window.isFloatingPanel = false
-        window.level = .normal
         window.center()
         window.isReleasedWhenClosed = false
+        NSApp.setActivationPolicy(.regular)
         NSApp.activate()
         window.makeKeyAndOrderFront(nil)
+        window.orderFrontRegardless()
 
         windows[item.id] = window
     }
@@ -40,6 +40,9 @@ final class ApprovalWindowManager: ObservableObject {
     func close(id: UUID) {
         windows[id]?.close()
         windows.removeValue(forKey: id)
+        if windows.isEmpty {
+            NSApp.setActivationPolicy(.accessory)
+        }
     }
 
     func closeAll() {
