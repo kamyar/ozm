@@ -77,32 +77,7 @@ struct MenuBarView: View {
                         Spacer()
                     }
                     HStack(spacing: 6) {
-                        Spacer()
-                        Button {
-                            windowManager?.open(item: item, queue: queue)
-                        } label: {
-                            Image(systemName: "arrow.up.forward.square")
-                        }
-                        .buttonStyle(.borderless)
-                        .help("Open in window")
-
-                        Button("Deny") {
-                            queue.respond(to: item.id, with: ApprovalResponse(
-                                id: item.request.id,
-                                decision: .deny
-                            ))
-                        }
-                        .controlSize(.small)
-
-                        Button(item.request.type == .override ? "Allow Once" : "Allow") {
-                            queue.respond(to: item.id, with: ApprovalResponse(
-                                id: item.request.id,
-                                decision: .allow,
-                                command: item.request.payload.command
-                            ))
-                        }
-                        .controlSize(.small)
-                        .buttonStyle(.borderedProminent)
+                        MenuBarFeedbackField(item: item, queue: queue, windowManager: windowManager)
                     }
                 }
                 .padding(.horizontal, 12)
@@ -136,5 +111,47 @@ struct MenuBarView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
+    }
+}
+
+struct MenuBarFeedbackField: View {
+    let item: ApprovalQueue.PendingApproval
+    @ObservedObject var queue: ApprovalQueue
+    var windowManager: ApprovalWindowManager?
+    @State private var feedback = ""
+
+    var body: some View {
+        TextField("Feedback...", text: $feedback)
+            .textFieldStyle(.roundedBorder)
+            .font(.caption)
+            .frame(maxWidth: .infinity)
+
+        Button {
+            windowManager?.open(item: item, queue: queue)
+        } label: {
+            Image(systemName: "arrow.up.forward.square")
+        }
+        .buttonStyle(.borderless)
+        .help("Open in window")
+
+        Button("Deny") {
+            queue.respond(to: item.id, with: ApprovalResponse(
+                id: item.request.id,
+                decision: .deny,
+                feedback: feedback.isEmpty ? nil : feedback
+            ))
+        }
+        .controlSize(.small)
+
+        Button(item.request.type == .override ? "Allow Once" : "Allow") {
+            queue.respond(to: item.id, with: ApprovalResponse(
+                id: item.request.id,
+                decision: .allow,
+                feedback: feedback.isEmpty ? nil : feedback,
+                command: item.request.payload.command
+            ))
+        }
+        .controlSize(.small)
+        .buttonStyle(.borderedProminent)
     }
 }
