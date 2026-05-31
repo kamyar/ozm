@@ -11,6 +11,7 @@ from ozm.run import reset_cmd, run_cmd, status_cmd
 from ozm.git import git_cmd
 from ozm.install import install_cmd
 from ozm.cmd import cmd_cmd
+from ozm.app import app_cmd
 from ozm.doctor import doctor_cmd
 
 
@@ -104,4 +105,5 @@ cli.add_command(log_cmd, "log")
 cli.add_command(doctor_cmd, "doctor")
 cli.add_command(trust_cmd, "trust")
 cli.add_command(config_cmd, "config")
+cli.add_command(app_cmd, "app")
 cli.add_command(version_cmd, "version")
