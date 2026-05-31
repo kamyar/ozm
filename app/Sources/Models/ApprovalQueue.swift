@@ -36,6 +36,7 @@ final class ApprovalQueue: ObservableObject {
         guard let index = pending.firstIndex(where: { $0.id == id }) else { return }
         let item = pending.remove(at: index)
         item.continuation.resume(returning: response)
+        windowManager?.close(id: id)
     }
 
     func cancel(id: UUID) {
