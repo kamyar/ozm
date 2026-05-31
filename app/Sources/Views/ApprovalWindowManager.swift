@@ -31,6 +31,7 @@ final class ApprovalWindowManager: ObservableObject {
         window.level = .normal
         window.center()
         window.isReleasedWhenClosed = false
+        NSApp.activate()
         window.makeKeyAndOrderFront(nil)
 
         windows[item.id] = window
