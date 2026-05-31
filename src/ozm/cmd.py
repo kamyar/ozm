@@ -105,6 +105,11 @@ def _find_script_in_args(args: tuple[str, ...]) -> tuple[str, str] | None:
                 return arg, inferred
         if not interpreter and "/" not in arg and arg in INTERPRETERS:
             interpreter = arg
+            continue
+        # Non-wrapper, non-interpreter, non-script token (e.g. "pytest") —
+        # everything after this is arguments to that command, not scripts.
+        if not interpreter:
+            return None
     return None
 
 

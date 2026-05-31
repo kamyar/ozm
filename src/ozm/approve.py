@@ -6,9 +6,11 @@ import platform
 import subprocess
 import tempfile
 import unicodedata
+import uuid
 from typing import NamedTuple
 
 from ozm.agent import AgentMetadata, extract_agent_metadata_from_command
+from ozm.socket_client import send_request as _socket_send
 
 
 def _secure_tmpfile(suffix: str, content: str) -> str:
@@ -49,6 +51,101 @@ def _get_git_diff(path: str) -> str | None:
     return None
 
 
+def _detect_syntax(path: str) -> str:
+    try:
+        from pygments.lexers import get_lexer_for_filename
+        return get_lexer_for_filename(path).name.lower()
+    except Exception:
+        return "text"
+
+
+def _parse_socket_response(resp: dict | None) -> ApprovalResult | None:
+    """Convert a socket response dict to ApprovalResult, or None if unusable."""
+    if resp is None:
+        return None
+    decision = resp.get("decision")
+    if decision == "allow":
+        approved = True
+    elif decision == "deny":
+        approved = False
+    elif decision == "error":
+        return None
+    else:
+        return None
+    return ApprovalResult(
+        approved=approved,
+        feedback=resp.get("feedback") or None,
+        command=resp.get("command") or None,
+        allow_pattern=resp.get("allow_pattern") or None,
+        block_pattern=resp.get("block_pattern") or None,
+        apply_globally=resp.get("apply_globally", False),
+    )
+
+
+def _try_socket_file(
+    script: str,
+    label: str,
+    agent: AgentMetadata,
+    diff: str | None,
+) -> ApprovalResult | None:
+    abs_path = os.path.abspath(script)
+    try:
+        with open(abs_path) as f:
+            content = f.read()
+        line_count = content.count("\n") + (1 if content and not content.endswith("\n") else 0)
+    except OSError:
+        return None
+    request = {
+        "version": 1,
+        "id": str(uuid.uuid4()),
+        "type": "file_approval",
+        "agent": {"name": agent.name, "description": agent.description},
+        "payload": {
+            "script": abs_path,
+            "label": label,
+            "content": content,
+            "diff": diff,
+            "line_count": line_count,
+            "syntax": _detect_syntax(abs_path),
+        },
+    }
+    return _parse_socket_response(_socket_send(request))
+
+
+def _try_socket_cmd(
+    command: str,
+    agent: AgentMetadata,
+) -> ApprovalResult | None:
+    request = {
+        "version": 1,
+        "id": str(uuid.uuid4()),
+        "type": "cmd_approval",
+        "agent": {"name": agent.name, "description": agent.description},
+        "payload": {"command": command},
+    }
+    return _parse_socket_response(_socket_send(request))
+
+
+def _try_socket_override(
+    command: str,
+    violation: str,
+    reason: str,
+    agent: AgentMetadata,
+) -> ApprovalResult | None:
+    request = {
+        "version": 1,
+        "id": str(uuid.uuid4()),
+        "type": "override",
+        "agent": {"name": agent.name, "description": agent.description},
+        "payload": {
+            "command": command,
+            "violation": violation,
+            "reason": reason,
+        },
+    }
+    return _parse_socket_response(_socket_send(request))
+
+
 def request_approval(
     script: str,
     label: str,
@@ -60,6 +157,9 @@ def request_approval(
     diff = _get_git_diff(script) if label == "CHANGED" else None
     if diff is None and snapshot_diff is not None:
         diff = snapshot_diff
+    result = _try_socket_file(script, label, agent, diff)
+    if result is not None:
+        return result
     if platform.system() == "Darwin":
         return _approve_file_macos(script, label, agent, diff=diff)
     return ApprovalResult(approved=None)
@@ -78,6 +178,9 @@ def request_cmd_approval(
             name="Command approval",
             description="Review this command before execution.",
         )
+    result = _try_socket_cmd(command, agent)
+    if result is not None:
+        return result
     if platform.system() == "Darwin":
         return _approve_cmd_macos(command, agent)
     return ApprovalResult(approved=None)
@@ -90,6 +193,9 @@ def request_override(
     agent: AgentMetadata,
 ) -> ApprovalResult:
     """Ask the user for a one-time override of a blocked operation."""
+    result = _try_socket_override(command, violation, reason, agent)
+    if result is not None:
+        return result
     if platform.system() == "Darwin":
         return _override_macos(command, violation, reason, agent)
     return ApprovalResult(approved=None)
