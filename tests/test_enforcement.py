@@ -78,6 +78,39 @@ class CmdTests(unittest.TestCase):
         subprocess_mod.run.assert_called_once_with(["rm", "-rf", "build"])
         request_cmd_approval.assert_not_called()
 
+    def test_cmd_rejects_python_c_inline_code(self):
+        result = CliRunner().invoke(cmd_mod.cmd_cmd, [*META, "python", "-c", "print(1)"])
+
+        self.assertNotEqual(result.exit_code, 0)
+        self.assertIn("write the code to a script file", result.output)
+        self.assertIn("#!/usr/bin/env python", result.output)
+
+    def test_cmd_rejects_python3_c_inline_code(self):
+        result = CliRunner().invoke(cmd_mod.cmd_cmd, [*META, "python3", "-c", "print(1)"])
+
+        self.assertNotEqual(result.exit_code, 0)
+        self.assertIn("write the code to a script file", result.output)
+        self.assertIn("#!/usr/bin/env python3", result.output)
+
+    def test_cmd_rejects_uv_run_python_c(self):
+        result = CliRunner().invoke(
+            cmd_mod.cmd_cmd, [*META, "uv", "run", "python", "-c", "print(1)"]
+        )
+
+        self.assertNotEqual(result.exit_code, 0)
+        self.assertIn("write the code to a script file", result.output)
+
+    def test_cmd_rejects_uv_run_py_script(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            with open("script.py", "w") as f:
+                f.write("print('hello')\n")
+            result = runner.invoke(cmd_mod.cmd_cmd, [*META, "uv", "run", "script.py"])
+
+        self.assertNotEqual(result.exit_code, 0)
+        self.assertIn("ozm run", result.output)
+        self.assertIn("#!/usr/bin/env python3", result.output)
+
 
 class GitTests(unittest.TestCase):
     def test_push_blocks_force_with_lease(self):
