@@ -1,6 +1,7 @@
 __pycache__/
 *.pyc
 dist/
+src/ozm/_bin/
 *.egg-info/
 .venv/
 poetry.lock

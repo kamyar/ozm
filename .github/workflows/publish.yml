@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - "src/**"
+      - "app/**"
       - "pyproject.toml"
       - "poetry.lock"
 
@@ -13,7 +14,9 @@ permissions:
 
 jobs:
   publish:
-    runs-on: ubuntu-latest
+    # macOS runner so we can build the universal Swift menu bar binary that
+    # gets bundled into the macOS wheel.
+    runs-on: macos-14
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
@@ -26,7 +29,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install Poetry
-        run: pip install poetry
+        run: pip install poetry wheel
 
       - name: Set version
         id: version
@@ -43,8 +46,30 @@ jobs:
           git tag "v${VERSION}"
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 
-      - name: Build
+      - name: Build sdist and pure wheel
         run: poetry build
+
+      - name: Build universal menu bar binary and bundle into wheel
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          # Must match platforms: [.macOS(.v14)] in app/Package.swift.
+          PLATFORM_TAG: macosx_14_0_universal2
+        run: |
+          set -euo pipefail
+          swift build -c release --package-path app --arch arm64 --arch x86_64
+          BIN_PATH="$(swift build -c release --package-path app --arch arm64 --arch x86_64 --show-bin-path)/OzmApp"
+          test -f "$BIN_PATH"
+
+          cd dist
+          python -m wheel unpack "ozm-${VERSION}-py3-none-any.whl"
+          mkdir -p "ozm-${VERSION}/ozm/_bin"
+          cp "$BIN_PATH" "ozm-${VERSION}/ozm/_bin/OzmApp"
+          chmod +x "ozm-${VERSION}/ozm/_bin/OzmApp"
+          python -m wheel pack "ozm-${VERSION}"
+          rm -rf "ozm-${VERSION}"
+          # Retag the pure wheel as a macOS universal2 wheel and drop the any-tag copy.
+          python -m wheel tags --platform-tag "${PLATFORM_TAG}" --remove "ozm-${VERSION}-py3-none-any.whl"
+          ls -la
 
       - name: Publish to PyPI
         run: poetry publish --username __token__ --password "${{ secrets.PYPI_TOKEN }}"
