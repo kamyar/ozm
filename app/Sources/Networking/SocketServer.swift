@@ -31,7 +31,7 @@ final class SocketServer: ObservableObject {
         do {
             let listener = try NWListener(using: params)
             listener.stateUpdateHandler = { [weak self] state in
-                Task { @MainActor in
+                Task { @MainActor [weak self] in
                     switch state {
                     case .ready:
                         self?.isRunning = true
@@ -43,7 +43,7 @@ final class SocketServer: ObservableObject {
                 }
             }
             listener.newConnectionHandler = { [weak self] conn in
-                Task { @MainActor in
+                Task { @MainActor [weak self] in
                     self?.handleConnection(conn)
                 }
             }
@@ -76,7 +76,7 @@ final class SocketServer: ObservableObject {
 
         connection.stateUpdateHandler = { [weak self] state in
             if case .failed = state {
-                Task { @MainActor in
+                Task { @MainActor [weak self] in
                     self?.removeConnection(connID)
                 }
             }
@@ -89,7 +89,7 @@ final class SocketServer: ObservableObject {
     private func readRequest(from connection: NWConnection, id connID: UUID) {
         connection.receive(minimumIncompleteLength: 1, maximumLength: 1_048_576) {
             [weak self] data, _, isComplete, error in
-            Task { @MainActor in
+            Task { @MainActor [weak self] in
                 guard let self else { return }
 
                 if let error {
@@ -170,7 +170,7 @@ final class SocketServer: ObservableObject {
         var payload = data
         payload.append(contentsOf: "\n".utf8)
         connection.send(content: payload, completion: .contentProcessed { [weak self] _ in
-            Task { @MainActor in
+            Task { @MainActor [weak self] in
                 self?.removeConnection(connID)
             }
         })
