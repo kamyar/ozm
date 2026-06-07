@@ -28,9 +28,17 @@ RG_PRE_REASON = (
     "Use rg without --pre, or put preprocessing in a reviewed script and run it "
     "with 'ozm run <script>'."
 )
+CURL_ALTERNATIVES = (
+    "curl is disallowed by default because raw curl invocations are easy to "
+    "mis-issue and hard to review. Install HTTPie with 'uv tool install httpie' "
+    "and use explicit methods (e.g. 'http GET <url>', 'http POST <url> key=value'). "
+    "For complex requests, write a small reviewed Python script using httpx (or a "
+    "similar modern client) and run it with 'ozm run <script>'."
+)
 DISALLOWED_COMMANDS = {
     "sed": SED_ALTERNATIVES,
     "gsed": SED_ALTERNATIVES,
+    "curl": CURL_ALTERNATIVES,
 }
 READ_ONLY_GH_PREFIX_RULES = {
     "gh issue list",
