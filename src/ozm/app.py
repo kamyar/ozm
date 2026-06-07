@@ -18,8 +18,19 @@ def _app_path() -> str:
 def _dev_binary() -> str | None:
     src = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     repo_root = os.path.dirname(src)
+    for config in ("release", "debug"):
+        binary = os.path.join(
+            repo_root, "app", ".build", config, "OzmApp"
+        )
+        if os.path.isfile(binary):
+            return binary
+    return None
+
+
+def _bundled_binary() -> str | None:
+    """The prebuilt OzmApp shipped inside the installed package (PyPI wheel)."""
     binary = os.path.join(
-        repo_root, "app", ".build", "debug", "OzmApp"
+        os.path.dirname(os.path.abspath(__file__)), "_bin", "OzmApp"
     )
     if os.path.isfile(binary):
         return binary
@@ -34,16 +45,17 @@ def app_cmd():
 @app_cmd.command("start")
 def app_start():
     """Launch the ozm menu bar app."""
+    # Prefer a local dev build, then the binary bundled in the wheel.
+    binary = _dev_binary() or _bundled_binary()
+    if binary:
+        subprocess.Popen([binary])
+        click.echo(f"ozm: launched {binary}")
+        return
+
     app = _app_path()
     if os.path.isdir(app):
         subprocess.Popen(["open", app])
         click.echo(f"ozm: launched {app}")
-        return
-
-    binary = _dev_binary()
-    if binary:
-        subprocess.Popen([binary])
-        click.echo(f"ozm: launched dev build {binary}")
         return
 
     click.echo("ozm: app not found. Build with 'ozm app build' first.", err=True)
