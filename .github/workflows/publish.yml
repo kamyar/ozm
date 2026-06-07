@@ -28,6 +28,11 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Select newest Xcode
+        # The default runner Xcode (15.4 / Swift 5.10) rejects the menu bar
+        # app's concurrency code; the newest installed Xcode ships Swift 6.
+        run: sudo xcode-select -s "$(ls -d /Applications/Xcode_*.app | sort -V | tail -n1)"
+
       - name: Install Poetry
         run: pip install poetry wheel
 
