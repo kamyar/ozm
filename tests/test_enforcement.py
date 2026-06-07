@@ -8,6 +8,7 @@ from unittest.mock import patch
 from click.testing import CliRunner
 
 from ozm import cmd as cmd_mod
+from ozm import cli as cli_mod
 from ozm import git as git_mod
 from ozm import install as install_mod
 from ozm.approve import ApprovalResult
@@ -16,6 +17,16 @@ META = [
     "--agent-name", "Unit test",
     "--agent-description", "Exercise ozm command behavior.",
 ]
+
+
+class TipsTests(unittest.TestCase):
+    def test_tips_command_lists_guidance(self):
+        result = CliRunner().invoke(cli_mod.tips_cmd, [])
+
+        self.assertEqual(result.exit_code, 0)
+        self.assertIn("ozm run <script>", result.output)
+        self.assertIn("read-only", result.output)
+        self.assertIn("bash -lc", result.output)
 
 
 class CmdTests(unittest.TestCase):
@@ -58,6 +69,20 @@ class CmdTests(unittest.TestCase):
 
         self.assertNotEqual(result.exit_code, 0)
         self.assertIn("blocked command 'sed'", result.output)
+
+    def test_cmd_rejects_curl_with_alternatives(self):
+        with patch.object(cmd_mod, "request_cmd_approval") as request_cmd_approval, \
+            patch.object(cmd_mod, "audit_log"):
+            result = CliRunner().invoke(
+                cmd_mod.cmd_cmd,
+                [*META, "curl", "https://example.com"],
+            )
+
+        self.assertNotEqual(result.exit_code, 0)
+        self.assertIn("blocked command 'curl'", result.output)
+        self.assertIn("uv tool install httpie", result.output)
+        self.assertIn("httpx", result.output)
+        request_cmd_approval.assert_not_called()
 
     def test_blocked_override_executes_once_without_second_approval(self):
         completed = subprocess.CompletedProcess(args="rm -rf build", returncode=0)
@@ -201,6 +226,14 @@ class InstallHookTests(unittest.TestCase):
         self.assertIn("deny", result.stdout)
         self.assertIn("sed is disallowed", result.stdout)
         self.assertIn("rg for searching", result.stdout)
+
+    def test_hook_blocks_curl_with_alternatives(self):
+        result = self.run_hook("curl https://example.com")
+
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("deny", result.stdout)
+        self.assertIn("curl is disallowed", result.stdout)
+        self.assertIn("uv tool install httpie", result.stdout)
 
 
 if __name__ == "__main__":

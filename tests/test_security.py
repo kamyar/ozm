@@ -135,6 +135,34 @@ class TestSedAllowlistRejection(unittest.TestCase):
         save.assert_not_called()
 
 
+class TestCurlAllowlistRejection(unittest.TestCase):
+    """curl must never be allowlisted; agents should use HTTPie/httpx instead."""
+
+    def _allow(self, command):
+        with patch.object(config_mod, "load_project_config", return_value={
+            "allowed_commands": ["*", "curl *", "/usr/bin/curl *"],
+        }), patch.object(config_mod, "load_global_config", return_value={}):
+            return config_mod.is_command_allowed(command)
+
+    def test_curl_rejected_even_with_matching_allowlist(self):
+        self.assertFalse(self._allow("curl https://example.com"))
+
+    def test_path_curl_rejected_even_with_matching_allowlist(self):
+        self.assertFalse(self._allow("/usr/bin/curl https://example.com"))
+
+    def test_env_prefixed_curl_rejected_even_with_matching_allowlist(self):
+        self.assertFalse(self._allow("env FOO=bar curl https://example.com"))
+
+    def test_curl_pattern_not_saved_from_dialog(self):
+        with patch.object(config_mod, "load_project_config", return_value={
+            "allowed_commands": [],
+        }), patch.object(config_mod, "_save_user_config") as save:
+            saved = config_mod.add_allowed_command("curl *")
+
+        self.assertFalse(saved)
+        save.assert_not_called()
+
+
 class TestGlobalCommandConfig(unittest.TestCase):
     """Global command rules should compose safely with project rules."""
 
@@ -530,7 +558,7 @@ class TestCommandRulePersistence(unittest.TestCase):
              patch.object(cmd_mod, "request_cmd_approval", return_value=ApprovalResult(
                  approved=False,
                  command=None,
-                 block_pattern="curl * | sh",
+                 block_pattern="wget * | sh",
                  apply_globally=True,
              )), \
              patch.object(cmd_mod, "add_blocked_command", return_value=True) as add_blocked, \
@@ -538,11 +566,11 @@ class TestCommandRulePersistence(unittest.TestCase):
              patch.object(cmd_mod, "audit_log"):
             result = CliRunner().invoke(
                 cmd_mod.cmd_cmd,
-                [*META, "curl", "example.com", "|", "sh"],
+                [*META, "wget", "example.com", "|", "sh"],
             )
 
         self.assertNotEqual(result.exit_code, 0)
-        add_blocked.assert_called_once_with("curl * | sh", global_scope=True)
+        add_blocked.assert_called_once_with("wget * | sh", global_scope=True)
         mock_sub.run.assert_not_called()
         self.assertIn("added global blocklist pattern", result.output)
 
@@ -558,10 +586,10 @@ class TestCommandRulePersistence(unittest.TestCase):
              patch.object(cmd_mod, "add_blocked_command", return_value=True) as add_blocked, \
              patch.object(cmd_mod, "subprocess") as mock_sub, \
              patch.object(cmd_mod, "audit_log"):
-            result = CliRunner().invoke(cmd_mod.cmd_cmd, [*META, "curl", "example.com"])
+            result = CliRunner().invoke(cmd_mod.cmd_cmd, [*META, "wget", "example.com"])
 
         self.assertNotEqual(result.exit_code, 0)
-        add_blocked.assert_called_once_with("curl example.com", global_scope=True)
+        add_blocked.assert_called_once_with("wget example.com", global_scope=True)
         mock_sub.run.assert_not_called()
         self.assertIn("added global blocklist pattern", result.output)
 

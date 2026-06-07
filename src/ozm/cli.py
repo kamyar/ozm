@@ -79,6 +79,32 @@ def trust_cmd() -> None:
     click.echo(f"ozm: copied {repo_config} -> {dest}")
 
 
+TIPS = [
+    "Batch your work: instead of running many single commands, if you already "
+    "know the sequence of commands you'll need, put them in a script with a "
+    "shebang (e.g. #!/usr/bin/env bash) and run it once with 'ozm run <script>'.",
+    "Prefer read-only tools. Reach for rg, cat, nl, head, tail, ls, and git "
+    "status/log/diff before anything that mutates files or state.",
+    "Avoid complex commands. Keep each command simple and single-purpose; "
+    "long pipelines and chained operators are hard to review and approve.",
+    "Avoid hacky shell wrappers. Things like 'bash -lc ...', inline 'python -c', "
+    "or shell expansion ($(...), backticks) look like bypasses and are blocked — "
+    "put real logic in a reviewed script and run it with 'ozm run <script>'.",
+    "Avoid curl. Install HTTPie with 'uv tool install httpie' and use explicit "
+    "methods (e.g. 'http GET <url>', 'http POST <url> key=value'). For complex "
+    "requests, write a reviewed Python script using httpx and run it with "
+    "'ozm run <script>'.",
+]
+
+
+@click.command("tips")
+def tips_cmd() -> None:
+    """Show tips for working effectively (and within the rules) under ozm."""
+    click.echo("ozm tips — how to work effectively within the execution gate:\n")
+    for i, tip in enumerate(TIPS, 1):
+        click.echo(f"{i}. {tip}\n")
+
+
 @click.command("config")
 def config_cmd() -> None:
     """Show the path to this project's user-owned config."""
@@ -107,3 +133,4 @@ cli.add_command(trust_cmd, "trust")
 cli.add_command(config_cmd, "config")
 cli.add_command(app_cmd, "app")
 cli.add_command(version_cmd, "version")
+cli.add_command(tips_cmd, "tips")
