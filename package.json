@@ -1,0 +1,13 @@
+{
+  "name": "ozm-pi-integration",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Pi native integration for ozm command gating",
+  "keywords": ["pi-package", "ozm", "pi"],
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "pi": {
+    "extensions": ["extensions/pi.ts"]
+  }
+}
