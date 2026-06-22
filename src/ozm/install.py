@@ -31,8 +31,8 @@ if not command:
 def deny(reason):
     reason = (
         reason
-        + " Include --agent-name \"<what you are working on>\" and "
-        "--agent-description \"<one-line intent>\" on ozm commands. "
+        + " Include agent metadata via --agent-name/--agent-description, "
+        "--agent-json, or OZM_AGENT_NAME/OZM_AGENT_DESCRIPTION on ozm commands. "
         "If you forgot this, write it to memory before retrying."
     )
     json.dump({"hookSpecificOutput": {
@@ -147,15 +147,68 @@ def _flag_value(words, flag):
             return word.split("=", 1)[1]
     return None
 
+def _command_start_index(words):
+    index = 0
+    while index < len(words) and is_env_assignment(words[index]):
+        index += 1
+    if index < len(words) and os.path.basename(words[index]) == "env":
+        index += 1
+        while index < len(words):
+            token = words[index]
+            if token == "--":
+                index += 1
+                break
+            if is_env_assignment(token) or token in {"-i", "--ignore-environment"}:
+                index += 1
+                continue
+            if token in {"-u", "--unset"} and index + 1 < len(words):
+                index += 2
+                continue
+            if token.startswith("-u") or token.startswith("--unset="):
+                index += 1
+                continue
+            break
+    return index
+
+def _metadata_env_value(words, start, key):
+    for word in words[:start]:
+        if is_env_assignment(word):
+            name, _sep, value = word.partition("=")
+            if name == key:
+                return value
+    return None
+
+def _agent_json_values(raw):
+    try:
+        data = json.loads(raw)
+    except Exception:
+        return None, None, "--agent-json is not valid JSON."
+    if not isinstance(data, dict):
+        return None, None, "--agent-json must be a JSON object."
+    name = data.get("name", data.get("agent_name"))
+    description = data.get("description", data.get("agent_description"))
+    if name is not None and not isinstance(name, str):
+        return None, None, "--agent-json name must be a string."
+    if description is not None and not isinstance(description, str):
+        return None, None, "--agent-json description must be a string."
+    return name, description, None
+
 def validate_ozm_metadata(part):
     try:
         words = shlex.split(part, posix=True)
     except Exception:
         return "Could not parse ozm command for agent metadata."
-    if len(words) < 2 or words[1] not in {"run", "cmd", "git"}:
+    start = _command_start_index(words)
+    if len(words) < start + 2 or words[start] != "ozm" or words[start + 1] not in {"run", "cmd", "git", "shell", "bash"}:
         return None
-    name = _flag_value(words, "--agent-name")
-    description = _flag_value(words, "--agent-description")
+    json_name = json_description = None
+    agent_json = _flag_value(words, "--agent-json")
+    if agent_json is not None:
+        json_name, json_description, json_error = _agent_json_values(agent_json)
+        if json_error:
+            return json_error
+    name = _flag_value(words, "--agent-name") or json_name or _metadata_env_value(words, start, "OZM_AGENT_NAME")
+    description = _flag_value(words, "--agent-description") or json_description or _metadata_env_value(words, start, "OZM_AGENT_DESCRIPTION")
     if name is None or description is None:
         return "ozm run/cmd/git requires --agent-name and --agent-description."
     if not name.strip():

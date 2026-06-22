@@ -3,6 +3,7 @@
 
 import hashlib
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -12,10 +13,12 @@ import click
 from ozm.agent import extract_agent_metadata
 from ozm.approve import request_cmd_approval, request_override
 from ozm.audit import log as audit_log
+from ozm.exit_codes import BLOCKED, CONFIG_ERROR, DENIED, NO_DIALOG, click_error
 from ozm.config import (
     add_allowed_command,
     add_blocked_command,
     command_name,
+    command_parts,
     disallowed_command_reason,
     has_shell_metacharacters,
     is_command_allowed,
@@ -26,6 +29,7 @@ from ozm.github_graphql import read_only_reason as github_graphql_read_only_reas
 from ozm.run import load_hashes, save_hashes
 
 CMD_PREFIX = "cmd:"
+SAFE_READ_ONLY_COMMANDS = {"echo", "printf", "pwd", "date", "true", "false", "test"}
 
 
 def _cmd_hash(command: str) -> str:
@@ -38,6 +42,26 @@ def _scope_label(global_scope: bool) -> str:
 
 def _run_command(argv: list[str]) -> subprocess.CompletedProcess:
     return subprocess.run(argv)
+
+
+def _is_env_assignment_token(token: str) -> bool:
+    name, sep, _value = token.partition("=")
+    return bool(sep and name and re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", name))
+
+
+def _safe_read_only_reason(command: str) -> str | None:
+    if os.environ.get("OZM_SAFE_READONLY") != "1":
+        return None
+    parts = command_parts(command)
+    if not parts:
+        return None
+    first = os.path.basename(parts[0])
+    if first != "env" and _is_env_assignment_token(parts[0]):
+        return None
+    name = command_name(command)
+    if name in SAFE_READ_ONLY_COMMANDS:
+        return f"read-only {name}"
+    return None
 
 
 def _edited_argv(command: str) -> list[str]:
@@ -161,7 +185,7 @@ def cmd_cmd(command_and_args: tuple[str, ...]) -> None:
             f"make sure the script has a shebang ({shebang})",
             err=True,
         )
-        sys.exit(1)
+        sys.exit(BLOCKED)
 
     if args and args[0] == "git":
         click.echo(
@@ -171,7 +195,7 @@ def cmd_cmd(command_and_args: tuple[str, ...]) -> None:
             "instead of 'ozm cmd git ...'",
             err=True,
         )
-        sys.exit(1)
+        sys.exit(BLOCKED)
 
     command = shlex.join(args)
     disallowed = disallowed_command_reason(command)
@@ -179,21 +203,22 @@ def cmd_cmd(command_and_args: tuple[str, ...]) -> None:
         audit_log("blocked", "cmd", command)
         click.echo(f"ozm: blocked command '{command_name(command)}'", err=True)
         click.echo(f"ozm: {disallowed}", err=True)
-        sys.exit(1)
+        sys.exit(BLOCKED)
 
     try:
         blocked = is_command_blocked(command)
     except (OSError, RuntimeError) as exc:
         audit_log("error", "cmd", command, str(exc))
-        raise click.ClickException(
-            f"config error: {exc}. The command was NOT executed."
+        raise click_error(
+            f"config error: {exc}. The command was NOT executed.",
+            CONFIG_ERROR,
         ) from exc
     if blocked:
         if not reason:
             audit_log("blocked", "cmd", command)
             click.echo(f"ozm: blocked by pattern '{blocked}' in config", err=True)
             click.echo("ozm: use --reason \"justification\" to request a one-time override", err=True)
-            sys.exit(1)
+            sys.exit(BLOCKED)
         approval = request_override(command, f"blocked by pattern '{blocked}'", reason, agent)
         if approval.approved is True:
             audit_log("override", "cmd", command, approval.feedback)
@@ -203,9 +228,11 @@ def cmd_cmd(command_and_args: tuple[str, ...]) -> None:
         else:
             audit_log("denied", "cmd", command, approval.feedback)
             click.echo("ozm: override denied", err=True)
-            sys.exit(1)
+            sys.exit(DENIED)
 
-    semantic_reason = github_graphql_read_only_reason(args)
+    semantic_reason = _safe_read_only_reason(command)
+    if not semantic_reason:
+        semantic_reason = github_graphql_read_only_reason(args)
     if semantic_reason:
         audit_log("semantic", "cmd", command, semantic_reason)
         click.echo(f"ozm: allowed ({semantic_reason})", err=True)
@@ -216,8 +243,9 @@ def cmd_cmd(command_and_args: tuple[str, ...]) -> None:
         allowed = is_command_allowed(command)
     except (OSError, RuntimeError) as exc:
         audit_log("error", "cmd", command, str(exc))
-        raise click.ClickException(
-            f"config error: {exc}. The command was NOT executed."
+        raise click_error(
+            f"config error: {exc}. The command was NOT executed.",
+            CONFIG_ERROR,
         ) from exc
     if allowed:
         audit_log("config", "cmd", command)
@@ -231,8 +259,9 @@ def cmd_cmd(command_and_args: tuple[str, ...]) -> None:
         hashes = load_hashes()
     except (OSError, RuntimeError) as exc:
         audit_log("error", "cmd", command, str(exc))
-        raise click.ClickException(
-            f"approval cache error: {exc}. The command was NOT executed."
+        raise click_error(
+            f"approval cache error: {exc}. The command was NOT executed.",
+            CONFIG_ERROR,
         ) from exc
 
     if hashes.get(key) == current_hash:
@@ -254,13 +283,13 @@ def cmd_cmd(command_and_args: tuple[str, ...]) -> None:
             audit_log("blocked", "cmd", run_command)
             click.echo(f"ozm: blocked command '{command_name(run_command)}'", err=True)
             click.echo(f"ozm: {run_disallowed}", err=True)
-            sys.exit(1)
+            sys.exit(BLOCKED)
         if run_command != command:
             recheck = is_command_blocked(run_command)
             if recheck:
                 audit_log("blocked", "cmd", run_command)
                 click.echo(f"ozm: edited command blocked by pattern '{recheck}'", err=True)
-                sys.exit(1)
+                sys.exit(BLOCKED)
         allow_pattern = approval.allow_pattern
         if approval.apply_globally and not allow_pattern:
             allow_pattern = run_command
@@ -270,9 +299,10 @@ def cmd_cmd(command_and_args: tuple[str, ...]) -> None:
                 added = add_allowed_command(allow_pattern, global_scope=approval.apply_globally)
             except (OSError, RuntimeError) as exc:
                 audit_log("error", "cmd", run_command, str(exc))
-                raise click.ClickException(
+                raise click_error(
                     f"could not save {scope} allowlist pattern '{allow_pattern}': {exc}. "
-                    "The command was NOT executed."
+                    "The command was NOT executed.",
+                    CONFIG_ERROR,
                 ) from exc
             if added:
                 click.echo(
@@ -292,8 +322,9 @@ def cmd_cmd(command_and_args: tuple[str, ...]) -> None:
             save_hashes(hashes)
         except (OSError, RuntimeError) as exc:
             audit_log("error", "cmd", run_command, str(exc))
-            raise click.ClickException(
-                f"could not save approval cache: {exc}. The command was NOT executed."
+            raise click_error(
+                f"could not save approval cache: {exc}. The command was NOT executed.",
+                CONFIG_ERROR,
             ) from exc
         audit_log("clicked", "cmd", run_command, approval.feedback)
         if approval.feedback:
@@ -315,9 +346,10 @@ def cmd_cmd(command_and_args: tuple[str, ...]) -> None:
                 added = add_blocked_command(block_pattern, global_scope=approval.apply_globally)
             except (OSError, RuntimeError) as exc:
                 audit_log("error", "cmd", command, str(exc))
-                raise click.ClickException(
+                raise click_error(
                     f"could not save {scope} blocklist pattern '{block_pattern}': {exc}. "
-                    "The command was NOT executed."
+                    "The command was NOT executed.",
+                    CONFIG_ERROR,
                 ) from exc
             if added:
                 click.echo(
@@ -329,7 +361,7 @@ def cmd_cmd(command_and_args: tuple[str, ...]) -> None:
             click.echo(f"ozm: denied cmd — {approval.feedback}", err=True)
         else:
             click.echo("ozm: denied cmd", err=True)
-        sys.exit(1)
+        sys.exit(DENIED)
 
     audit_log("no-dialog", "cmd", command, approval.feedback)
     click.echo(f"ozm: {command}")
@@ -342,4 +374,4 @@ def cmd_cmd(command_and_args: tuple[str, ...]) -> None:
         "Tell the user ozm needs a macOS GUI session to approve this command.",
         err=True,
     )
-    sys.exit(1)
+    sys.exit(NO_DIALOG)

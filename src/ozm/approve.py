@@ -152,6 +152,7 @@ def request_approval(
     agent: AgentMetadata,
     *,
     snapshot_diff: str | None = None,
+    display_path: str | None = None,
 ) -> ApprovalResult:
     """Ask the user to review and approve a script via OS-native UI."""
     diff = _get_git_diff(script) if label == "CHANGED" else None
@@ -161,7 +162,7 @@ def request_approval(
     if result is not None:
         return result
     if platform.system() == "Darwin":
-        return _approve_file_macos(script, label, agent, diff=diff)
+        return _approve_file_macos(script, label, agent, diff=diff, display_path=display_path)
     return ApprovalResult(approved=None)
 
 
@@ -401,8 +402,10 @@ def _approve_file_macos(
     agent: AgentMetadata,
     *,
     diff: str | None = None,
+    display_path: str | None = None,
 ) -> ApprovalResult:
     abs_path = os.path.abspath(script)
+    shown_path = display_path or abs_path
     line_count = _count_lines(script)
     title = f"[{label}] {agent.name}"
     agent_context = _agent_context(agent)
@@ -411,7 +414,7 @@ def _approve_file_macos(
     diff_tmp = None
 
     if diff:
-        subtitle = f"{agent_context} — {abs_path} — diff ({line_count} lines total)"
+        subtitle = f"{agent_context} — {shown_path} — diff ({line_count} lines total)"
         diff_rtf = _render_diff_rtf(diff)
         if diff_rtf:
             diff_tmp = _secure_tmpfile(".rtf", diff_rtf)
@@ -422,7 +425,7 @@ def _approve_file_macos(
             load_section = _LOAD_PLAIN.replace("__FILEPATH__", _escape(diff_tmp))
             set_section = _SET_PLAIN
     else:
-        subtitle = f"{agent_context} — {abs_path} — {line_count} lines"
+        subtitle = f"{agent_context} — {shown_path} — {line_count} lines"
         rtf_content = _render_rtf(abs_path)
         if rtf_content:
             rtf_tmp = _secure_tmpfile(".rtf", rtf_content)

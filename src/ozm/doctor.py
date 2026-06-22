@@ -129,9 +129,7 @@ def _check_project_config() -> tuple[bool, str]:
     return False, f"no config — run 'ozm trust' to import .ozm.yaml"
 
 
-@click.command("doctor")
-def doctor_cmd() -> None:
-    """Check ozm installation health."""
+def _doctor_results() -> tuple[list[dict], bool]:
     checks = [
         ("ozm binary", _check_ozm_on_path),
         ("hook script", _check_hook_script),
@@ -142,13 +140,28 @@ def doctor_cmd() -> None:
         ("pygments", _check_pygments),
         ("project config", _check_project_config),
     ]
+    results = []
     all_ok = True
     for name, check in checks:
         ok, msg = check()
-        icon = "INFO" if ok is None else "ok" if ok else "WARN"
-        click.echo(f"  [{icon:>4}] {name}: {msg}")
+        status = "info" if ok is None else "ok" if ok else "warn"
         if ok is False:
             all_ok = False
+        results.append({"name": name, "ok": ok, "status": status, "message": msg})
+    return results, all_ok
+
+
+@click.command("doctor")
+@click.option("--json", "json_output", is_flag=True, help="Emit machine-readable JSON.")
+def doctor_cmd(json_output: bool) -> None:
+    """Check ozm installation health."""
+    results, all_ok = _doctor_results()
+    if json_output:
+        click.echo(json.dumps({"all_ok": all_ok, "checks": results}, sort_keys=True))
+        return
+    for item in results:
+        icon = "INFO" if item["ok"] is None else "ok" if item["ok"] else "WARN"
+        click.echo(f"  [{icon:>4}] {item['name']}: {item['message']}")
     if all_ok:
         click.echo("\nAll checks passed.")
     else:
