@@ -3,6 +3,7 @@
 
 import os
 import json
+import re
 from datetime import datetime, timezone
 
 import click
@@ -32,14 +33,58 @@ def log(action: str, kind: str, target: str, feedback: str | None = None) -> Non
         f.write(line + "\n")
 
 
+_LOG_RE = re.compile(r"^(?P<timestamp>.{19})  (?P<action>.{1,9})  (?P<kind>.{1,3})  (?P<rest>.*)$")
+
+
+def _decode_one_line(value: str) -> str:
+    try:
+        return json.loads(f'"{value}"')
+    except json.JSONDecodeError:
+        return value
+
+
+def parse_line(line: str) -> dict:
+    raw = line.rstrip("\n")
+    match = _LOG_RE.match(raw)
+    if not match:
+        return {"raw": raw}
+    rest = match.group("rest")
+    feedback = None
+    if "  # " in rest:
+        rest, feedback = rest.split("  # ", 1)
+    cwd = ""
+    target = rest
+    if "  " in rest:
+        cwd, target = rest.split("  ", 1)
+    entry = {
+        "timestamp": match.group("timestamp"),
+        "action": _decode_one_line(match.group("action").strip()),
+        "kind": _decode_one_line(match.group("kind").strip()),
+        "cwd": _decode_one_line(cwd),
+        "target": _decode_one_line(target),
+        "raw": raw,
+    }
+    if feedback is not None:
+        entry["feedback"] = _decode_one_line(feedback)
+    return entry
+
+
 @click.command("log")
 @click.option("-n", "count", default=20, type=click.IntRange(min=1), help="Number of entries to show.")
-def log_cmd(count: int) -> None:
+@click.option("--json", "json_output", is_flag=True, help="Emit machine-readable JSON.")
+def log_cmd(count: int, json_output: bool) -> None:
     """Show recent audit log entries."""
     if not os.path.exists(AUDIT_FILE):
-        click.echo("No audit log yet.")
+        if json_output:
+            click.echo(json.dumps({"entries": []}, sort_keys=True))
+        else:
+            click.echo("No audit log yet.")
         return
     with open(AUDIT_FILE) as f:
         lines = f.readlines()
-    for line in lines[-count:]:
+    selected = lines[-count:]
+    if json_output:
+        click.echo(json.dumps({"entries": [parse_line(line) for line in selected]}, sort_keys=True))
+        return
+    for line in selected:
         click.echo(line.rstrip())

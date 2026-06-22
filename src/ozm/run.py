@@ -3,15 +3,18 @@
 
 import difflib
 import hashlib
+import json
 import os
 import stat
 import subprocess
 import sys
+import tempfile
 
 import click
 from ozm.agent import extract_agent_metadata
 from ozm.approve import request_approval
 from ozm.audit import log as audit_log
+from ozm.exit_codes import CONFIG_ERROR, DENIED, NO_DIALOG, click_error
 from ozm.config import project_key
 from ozm.storage import (
     load_yaml_no_follow,
@@ -23,6 +26,8 @@ from ozm.storage import (
 OZM_DIR = os.path.expanduser("~/.ozm")
 HASH_FILE = os.path.join(OZM_DIR, "hashes.yaml")
 SNAPSHOTS_DIR = os.path.join(OZM_DIR, "snapshots")
+STDIN_PREFIX = "stdin:"
+SHELL_PREFIX = "shell:"
 
 
 def _refuse_symlink(path: str, label: str) -> None:
@@ -136,6 +141,50 @@ def ensure_executable(path: str) -> None:
         os.chmod(path, st.st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
 
+def compute_content_hash(content: str | bytes) -> str:
+    if isinstance(content, str):
+        content = content.encode()
+    return hashlib.sha256(content).hexdigest()
+
+
+def _safe_title_suffix(title: str) -> str:
+    base = os.path.basename(title.strip()) or "stdin-script"
+    _root, ext = os.path.splitext(base)
+    if ext and all(ch.isalnum() or ch in ".-_" for ch in ext):
+        return ext
+    return ".sh"
+
+
+def _write_temp_script(content: str, title: str) -> str:
+    fd, path = tempfile.mkstemp(prefix="ozm-stdin-", suffix=_safe_title_suffix(title))
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(content)
+        ensure_executable(path)
+    except Exception:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+        raise
+    return path
+
+
+def _cleanup(path: str | None) -> None:
+    if not path:
+        return
+    try:
+        os.unlink(path)
+    except OSError:
+        pass
+
+
+def _execute_script(abs_path: str, args: tuple[str, ...]) -> None:
+    ensure_executable(abs_path)
+    result = subprocess.run([abs_path, *args])
+    sys.exit(result.returncode)
+
+
 def _display_key_target(root: str, target: str) -> str:
     if not os.path.isabs(target):
         return target
@@ -147,14 +196,145 @@ def _display_key_target(root: str, target: str) -> str:
     return target
 
 
+def _run_reviewed_script(
+    script: str,
+    args: tuple[str, ...],
+    agent,
+    *,
+    key_target: str | None = None,
+    display_name: str | None = None,
+    current_hash: str | None = None,
+    cleanup_path: str | None = None,
+) -> None:
+    abs_path = resolve_path(script)
+    key_target = key_target or abs_path
+    display_name = display_name or script
+    dialog_display_path = display_name if key_target.startswith((STDIN_PREFIX, SHELL_PREFIX)) else None
+    audit_target = key_target
+    key = project_key(key_target)
+    if current_hash is None:
+        current_hash = compute_hash(script)
+    try:
+        hashes = load_hashes()
+    except (OSError, RuntimeError) as exc:
+        audit_log("error", "run", audit_target, str(exc))
+        _cleanup(cleanup_path)
+        raise click_error(
+            f"approval cache error: {exc}. The script was NOT executed.",
+            CONFIG_ERROR,
+        ) from exc
+    stored_hash = hashes.get(key)
+
+    try:
+        if stored_hash == current_hash:
+            audit_log("cached", "run", audit_target)
+            click.echo("ozm: allowed (cached)", err=True)
+            _execute_script(abs_path, args)
+
+        label = "NEW" if stored_hash is None else "CHANGED"
+
+        snap_diff = None
+        if label == "CHANGED":
+            snap_diff, _, _ = snapshot_diff(key, abs_path)
+
+        approval = request_approval(
+            script,
+            label,
+            agent,
+            snapshot_diff=snap_diff,
+            display_path=dialog_display_path,
+        )
+
+        if approval.approved is True:
+            hashes[key] = current_hash
+            try:
+                save_hashes(hashes)
+            except (OSError, RuntimeError) as exc:
+                audit_log("error", "run", audit_target, str(exc))
+                raise click_error(
+                    f"could not save approval cache: {exc}. The script was NOT executed.",
+                    CONFIG_ERROR,
+                ) from exc
+            try:
+                save_snapshot(key, abs_path)
+            except (OSError, RuntimeError):
+                pass
+            audit_log("clicked", "run", audit_target, approval.feedback)
+            if approval.feedback:
+                click.echo(f"ozm: approved {display_name} — {approval.feedback}", err=True)
+            else:
+                click.echo(f"ozm: approved {display_name}")
+            _execute_script(abs_path, args)
+
+        if approval.approved is False:
+            audit_log("denied", "run", audit_target, approval.feedback)
+            if approval.feedback:
+                click.echo(f"ozm: denied {display_name} — {approval.feedback}", err=True)
+            else:
+                click.echo(f"ozm: denied {display_name}", err=True)
+            sys.exit(DENIED)
+
+        audit_log("no-dialog", "run", audit_target, approval.feedback)
+        click.echo(f"ozm: [{label}] {display_name}")
+        show_file(script)
+        if approval.feedback:
+            click.echo(f"ozm: dialog error: {approval.feedback}", err=True)
+        click.echo(
+            "ozm: BLOCKED — approval dialog could not be displayed. "
+            "The script was NOT executed. "
+            "Do NOT retry. "
+            "Tell the user ozm needs a macOS GUI session to approve this script.",
+            err=True,
+        )
+        sys.exit(NO_DIALOG)
+    finally:
+        _cleanup(cleanup_path)
+
+
+def run_stdin_content(
+    content: str,
+    args: tuple[str, ...],
+    agent,
+    *,
+    title: str | None = None,
+    key_prefix: str = STDIN_PREFIX,
+    display_prefix: str = "stdin",
+) -> None:
+    title = (title or "stdin-script").strip() or "stdin-script"
+    if not content:
+        raise click.ClickException("stdin script is empty")
+    if not content.startswith("#!"):
+        raise click.ClickException(
+            "stdin script must start with a shebang; use 'ozm bash --command ...' "
+            "for raw shell snippets"
+        )
+    tmp = _write_temp_script(content, title)
+    _run_reviewed_script(
+        tmp,
+        args,
+        agent,
+        key_target=f"{key_prefix}{title}",
+        display_name=f"{display_prefix}:{title}",
+        current_hash=compute_content_hash(content),
+        cleanup_path=tmp,
+    )
+
+
 @click.command(
     "run",
     context_settings={"ignore_unknown_options": True, "allow_extra_args": True},
 )
-@click.argument("items", nargs=-1, type=click.UNPROCESSED, required=True)
-def run_cmd(items: tuple[str, ...]) -> None:
+@click.option("--stdin", "from_stdin", is_flag=True, help="Read reviewed script content from stdin.")
+@click.option("--title", help="Stable title for --stdin approval cache entries.")
+@click.argument("items", nargs=-1, type=click.UNPROCESSED, required=False)
+def run_cmd(from_stdin: bool, title: str | None, items: tuple[str, ...]) -> None:
     """Run a script after content review (hash-gated)."""
     parts, agent = extract_agent_metadata(list(items))
+    if from_stdin:
+        run_stdin_content(sys.stdin.read(), tuple(parts), agent, title=title)
+        return
+    if title:
+        raise click.ClickException("--title is only valid with --stdin")
     if not parts:
         raise click.ClickException("Provide a script to run.")
 
@@ -167,111 +347,73 @@ def run_cmd(items: tuple[str, ...]) -> None:
         raise click.ClickException(f"{script}: not a file")
 
     abs_path = resolve_path(script)
-    key = project_key(abs_path)
-    current_hash = compute_hash(script)
-    try:
-        hashes = load_hashes()
-    except (OSError, RuntimeError) as exc:
-        audit_log("error", "run", abs_path, str(exc))
-        raise click.ClickException(
-            f"approval cache error: {exc}. The script was NOT executed."
-        ) from exc
-    stored_hash = hashes.get(key)
-
-    if stored_hash == current_hash:
-        audit_log("cached", "run", abs_path)
-        click.echo("ozm: allowed (cached)", err=True)
-        ensure_executable(script)
-        result = subprocess.run([abs_path, *args])
-        sys.exit(result.returncode)
-
-    label = "NEW" if stored_hash is None else "CHANGED"
-
-    snap_diff = None
-    if label == "CHANGED":
-        snap_diff, _, _ = snapshot_diff(key, abs_path)
-
-    approval = request_approval(script, label, agent, snapshot_diff=snap_diff)
-
-    if approval.approved is True:
-        hashes[key] = current_hash
-        try:
-            save_hashes(hashes)
-        except (OSError, RuntimeError) as exc:
-            audit_log("error", "run", abs_path, str(exc))
-            raise click.ClickException(
-                f"could not save approval cache: {exc}. The script was NOT executed."
-            ) from exc
-        try:
-            save_snapshot(key, abs_path)
-        except (OSError, RuntimeError):
-            pass
-        audit_log("clicked", "run", abs_path, approval.feedback)
-        if approval.feedback:
-            click.echo(f"ozm: approved {script} — {approval.feedback}", err=True)
-        else:
-            click.echo(f"ozm: approved {script}")
-        ensure_executable(script)
-        result = subprocess.run([abs_path, *args])
-        sys.exit(result.returncode)
-
-    if approval.approved is False:
-        audit_log("denied", "run", abs_path, approval.feedback)
-        if approval.feedback:
-            click.echo(f"ozm: denied {script} — {approval.feedback}", err=True)
-        else:
-            click.echo(f"ozm: denied {script}", err=True)
-        sys.exit(1)
-
-    audit_log("no-dialog", "run", abs_path, approval.feedback)
-    click.echo(f"ozm: [{label}] {script}")
-    show_file(script)
-    if approval.feedback:
-        click.echo(f"ozm: dialog error: {approval.feedback}", err=True)
-    click.echo(
-        "ozm: BLOCKED — approval dialog could not be displayed. "
-        "The script was NOT executed. "
-        "Do NOT retry. "
-        "Tell the user ozm needs a macOS GUI session to approve this script.",
-        err=True,
-    )
-    sys.exit(1)
+    _run_reviewed_script(script, args, agent, key_target=abs_path, display_name=script)
 
 
-@click.command("status")
-def status_cmd() -> None:
-    """Show tracked files and commands with their approval status."""
+def _status_entries() -> tuple[str, list[dict]]:
     from ozm.config import find_project_root
 
     root = find_project_root()
     prefix = root + "\0"
     hashes = load_hashes()
-    entries = {k: v for k, v in hashes.items() if k.startswith(prefix)}
+    tracked = {k: v for k, v in hashes.items() if k.startswith(prefix)}
+    entries = []
+    for key, stored_hash in sorted(tracked.items()):
+        target = key[len(prefix):]
+        display = _display_key_target(root, target)
+        added = 0
+        removed = 0
+        if target.startswith("cmd:"):
+            status = "ok"
+            kind = "cmd"
+        elif target.startswith(STDIN_PREFIX):
+            status = "ok"
+            kind = "stdin"
+        elif target.startswith(SHELL_PREFIX):
+            status = "ok"
+            kind = "shell"
+        elif os.path.exists(target):
+            kind = "run"
+            current = compute_hash(target)
+            if current == stored_hash:
+                status = "ok"
+            else:
+                status = "changed"
+                _, added, removed = snapshot_diff(key, target)
+        else:
+            status = "missing"
+            kind = "run"
+        entries.append(
+            {
+                "kind": kind,
+                "target": target,
+                "display": display,
+                "status": status,
+                "added": added,
+                "removed": removed,
+            }
+        )
+    return root, entries
+
+
+@click.command("status")
+@click.option("--json", "json_output", is_flag=True, help="Emit machine-readable JSON.")
+def status_cmd(json_output: bool) -> None:
+    """Show tracked files and commands with their approval status."""
+    root, entries = _status_entries()
+    if json_output:
+        click.echo(json.dumps({"project": root, "entries": entries}, sort_keys=True))
+        return
     if not entries:
         click.echo("No tracked entries.")
         return
-    for key, stored_hash in sorted(entries.items()):
-        target = key[len(prefix):]
-        display = _display_key_target(root, target)
-        if target.startswith("cmd:"):
-            label = "ok"
-            suffix = ""
-        elif os.path.exists(target):
-            current = compute_hash(target)
-            if current == stored_hash:
-                label = "ok"
-                suffix = ""
-            else:
-                label = "CHANGED"
-                _, added, removed = snapshot_diff(key, target)
-                if added or removed:
-                    suffix = f"  +{added} -{removed}"
-                else:
-                    suffix = ""
-        else:
-            label = "MISSING"
-            suffix = ""
-        click.echo(f"  [{label:>7}] {display}{suffix}")
+    labels = {"ok": "ok", "changed": "CHANGED", "missing": "MISSING"}
+    for entry in entries:
+        label = labels[entry["status"]]
+        suffix = ""
+        if entry["status"] == "changed" and (entry["added"] or entry["removed"]):
+            suffix = f"  +{entry['added']} -{entry['removed']}"
+        click.echo(f"  [{label:>7}] {entry['display']}{suffix}")
 
 
 @click.command("reset")

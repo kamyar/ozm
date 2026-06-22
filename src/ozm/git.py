@@ -12,6 +12,7 @@ from ozm.agent import AgentMetadata, extract_agent_metadata
 from ozm.approve import request_override
 from ozm.audit import log as audit_log
 from ozm.config import commit_config
+from ozm.exit_codes import BLOCKED, DENIED, NO_DIALOG
 
 MAX_SUBJECT_LENGTH = 72
 MAX_MESSAGE_LENGTH = 500
@@ -280,7 +281,7 @@ def _handle_violation(
     if not reason:
         click.echo(f"ozm: {violation}", err=True)
         click.echo("ozm: use --reason \"justification\" to request a one-time override", err=True)
-        sys.exit(1)
+        sys.exit(BLOCKED)
 
     approval = request_override(command, violation, reason, agent)
 
@@ -298,7 +299,7 @@ def _handle_violation(
             click.echo(f"ozm: override denied — {approval.feedback}", err=True)
         else:
             click.echo("ozm: override denied", err=True)
-        sys.exit(1)
+        sys.exit(DENIED)
 
     audit_log("no-dialog", "git", command)
     click.echo(
@@ -306,7 +307,7 @@ def _handle_violation(
         "Do NOT retry.",
         err=True,
     )
-    sys.exit(1)
+    sys.exit(NO_DIALOG)
 
 
 @click.command(

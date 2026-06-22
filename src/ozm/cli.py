@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import json
 import os
 import subprocess
 from importlib.metadata import version as pkg_version
@@ -13,6 +14,7 @@ from ozm.install import install_cmd
 from ozm.cmd import cmd_cmd
 from ozm.app import app_cmd
 from ozm.doctor import doctor_cmd
+from ozm.shell import shell_cmd
 
 
 def _get_version() -> str:
@@ -44,11 +46,67 @@ def version_cmd() -> None:
     click.echo(f"ozm {_get_version()}")
 
 
+def _emit_json(payload: dict) -> None:
+    click.echo(json.dumps(payload, sort_keys=True))
+
+
+def _read_bytes_if_regular(path: str) -> bytes | None:
+    if os.path.islink(path) or not os.path.isfile(path):
+        return None
+    try:
+        with open(path, "rb") as f:
+            return f.read()
+    except OSError:
+        return None
+
+
+def trust_status() -> dict:
+    """Return trust/config state for the current project."""
+    from ozm.config import _global_config_path, _project_config_path, find_project_root
+
+    root = find_project_root()
+    repo_config = os.path.join(root, ".ozm.yaml")
+    trusted_config = _project_config_path()
+    global_config = _global_config_path()
+    repo_bytes = _read_bytes_if_regular(repo_config)
+    trusted_bytes = _read_bytes_if_regular(trusted_config)
+    differs = None
+    if repo_bytes is not None and trusted_bytes is not None:
+        differs = repo_bytes != trusted_bytes
+    return {
+        "project": root,
+        "repo_config": repo_config,
+        "repo_config_exists": os.path.isfile(repo_config),
+        "repo_config_is_symlink": os.path.islink(repo_config),
+        "trusted_config": trusted_config,
+        "trusted_config_exists": os.path.isfile(trusted_config),
+        "trusted_config_is_symlink": os.path.islink(trusted_config),
+        "trusted_config_differs": differs,
+        "global_config": global_config,
+        "global_config_exists": os.path.isfile(global_config),
+    }
+
+
 @click.command("trust")
-def trust_cmd() -> None:
+@click.option("--check", "check_only", is_flag=True, help="Only report trust state; do not copy .ozm.yaml.")
+@click.option("--json", "json_output", is_flag=True, help="Emit machine-readable JSON.")
+def trust_cmd(check_only: bool, json_output: bool) -> None:
     """Snapshot the in-repo .ozm.yaml into ~/.ozm/projects/ (user-owned)."""
     from ozm.config import OZM_DIR, PROJECTS_DIR, _project_config_path, find_project_root
     from ozm.storage import refuse_symlink, save_bytes_atomic_no_follow
+
+    if check_only:
+        status = trust_status()
+        if json_output:
+            _emit_json(status)
+            return
+        click.echo(f"project: {status['project']}")
+        click.echo(f"repo:    {status['repo_config']}")
+        click.echo(f"trusted: {status['trusted_config']}")
+        click.echo(f"repo config exists:    {status['repo_config_exists']}")
+        click.echo(f"trusted config exists: {status['trusted_config_exists']}")
+        click.echo(f"trusted copy differs:  {status['trusted_config_differs']}")
+        return
 
     root = find_project_root()
     repo_config = os.path.join(root, ".ozm.yaml")
@@ -76,7 +134,12 @@ def trust_cmd() -> None:
         )
     except RuntimeError as exc:
         raise click.ClickException(str(exc)) from exc
-    click.echo(f"ozm: copied {repo_config} -> {dest}")
+    if json_output:
+        status = trust_status()
+        status["copied"] = True
+        _emit_json(status)
+    else:
+        click.echo(f"ozm: copied {repo_config} -> {dest}")
 
 
 TIPS = [
@@ -106,19 +169,22 @@ def tips_cmd() -> None:
 
 
 @click.command("config")
-def config_cmd() -> None:
+@click.option("--json", "json_output", is_flag=True, help="Emit machine-readable JSON.")
+def config_cmd(json_output: bool) -> None:
     """Show the path to this project's user-owned config."""
-    from ozm.config import _global_config_path, _project_config_path, find_project_root
-    root = find_project_root()
-    path = _project_config_path()
-    global_path = _global_config_path()
-    click.echo(f"project: {root}")
-    click.echo(f"config:  {path}")
-    click.echo(f"global:  {global_path}")
-    if os.path.isfile(path):
-        click.echo(f"status:  exists")
+    status = trust_status()
+    if json_output:
+        payload = dict(status)
+        payload["status"] = "exists" if status["trusted_config_exists"] else "not_found"
+        _emit_json(payload)
+        return
+    click.echo(f"project: {status['project']}")
+    click.echo(f"config:  {status['trusted_config']}")
+    click.echo(f"global:  {status['global_config']}")
+    if status["trusted_config_exists"]:
+        click.echo("status:  exists")
     else:
-        click.echo(f"status:  not found — run 'ozm trust' to import .ozm.yaml")
+        click.echo("status:  not found — run 'ozm trust' to import .ozm.yaml")
 
 
 cli.add_command(run_cmd, "run")
@@ -127,6 +193,8 @@ cli.add_command(reset_cmd, "reset")
 cli.add_command(git_cmd, "git")
 cli.add_command(install_cmd, "install")
 cli.add_command(cmd_cmd, "cmd")
+cli.add_command(shell_cmd, "shell")
+cli.add_command(shell_cmd, "bash")
 cli.add_command(log_cmd, "log")
 cli.add_command(doctor_cmd, "doctor")
 cli.add_command(trust_cmd, "trust")
