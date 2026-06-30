@@ -261,7 +261,7 @@ def _run_reviewed_script(
                 pass
             audit_log("clicked", "run", audit_target, approval.feedback)
             if approval.feedback:
-                click.echo(f"ozm: approved {display_name} — {approval.feedback}", err=True)
+                click.echo(f"ozm: approved {display_name} — [user] {approval.feedback}", err=True)
             else:
                 click.echo(f"ozm: approved {display_name}")
             _execute_script(abs_path, args)
@@ -269,7 +269,7 @@ def _run_reviewed_script(
         if approval.approved is False:
             audit_log("denied", "run", audit_target, approval.feedback)
             if approval.feedback:
-                click.echo(f"ozm: denied {display_name} — {approval.feedback}", err=True)
+                click.echo(f"ozm: denied {display_name} — [user] {approval.feedback}", err=True)
             else:
                 click.echo(f"ozm: denied {display_name}", err=True)
             sys.exit(DENIED)
@@ -278,7 +278,7 @@ def _run_reviewed_script(
         click.echo(f"ozm: [{label}] {display_name}")
         show_file(script)
         if approval.feedback:
-            click.echo(f"ozm: dialog error: {approval.feedback}", err=True)
+            click.echo(f"ozm: dialog error: [ozm] {approval.feedback}", err=True)
         click.echo(
             "ozm: BLOCKED — approval dialog could not be displayed. "
             "The script was NOT executed. "

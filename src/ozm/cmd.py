@@ -328,7 +328,7 @@ def cmd_cmd(command_and_args: tuple[str, ...]) -> None:
             ) from exc
         audit_log("clicked", "cmd", run_command, approval.feedback)
         if approval.feedback:
-            click.echo(f"ozm: approved cmd — {approval.feedback}", err=True)
+            click.echo(f"ozm: approved cmd — [user] {approval.feedback}", err=True)
         elif run_command != command:
             click.echo(f"ozm: approved cmd (edited)", err=True)
         else:
@@ -358,7 +358,7 @@ def cmd_cmd(command_and_args: tuple[str, ...]) -> None:
                 )
         audit_log("denied", "cmd", command, approval.feedback)
         if approval.feedback:
-            click.echo(f"ozm: denied cmd — {approval.feedback}", err=True)
+            click.echo(f"ozm: denied cmd — [user] {approval.feedback}", err=True)
         else:
             click.echo("ozm: denied cmd", err=True)
         sys.exit(DENIED)
@@ -366,7 +366,7 @@ def cmd_cmd(command_and_args: tuple[str, ...]) -> None:
     audit_log("no-dialog", "cmd", command, approval.feedback)
     click.echo(f"ozm: {command}")
     if approval.feedback:
-        click.echo(f"ozm: dialog error: {approval.feedback}", err=True)
+        click.echo(f"ozm: dialog error: [ozm] {approval.feedback}", err=True)
     click.echo(
         "ozm: BLOCKED — approval dialog could not be displayed. "
         "The command was NOT executed. "
