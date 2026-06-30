@@ -153,7 +153,7 @@ struct ApprovalWindowContent: View {
 
             let isDiff = item.request.payload.diff != nil
             let displayText = item.request.payload.diff ?? item.request.payload.content ?? ""
-            ColoredCodeView(text: displayText, isDiff: isDiff)
+            ColoredCodeView(text: displayText, isDiff: isDiff, syntax: item.request.payload.syntax)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(8)
                 .background(Color(nsColor: .textBackgroundColor))
@@ -266,19 +266,33 @@ struct ApprovalWindowContent: View {
 struct ColoredCodeView: View {
     let text: String
     let isDiff: Bool
+    var syntax: String? = nil
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             ForEach(Array(text.components(separatedBy: "\n").enumerated()), id: \.offset) { _, line in
-                Text(line)
+                lineText(line)
                     .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(colorForLine(line))
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.vertical, 0.5)
                     .background(backgroundForLine(line))
             }
         }
         .textSelection(.enabled)
+    }
+
+    @ViewBuilder
+    private func lineText(_ line: String) -> some View {
+        if isDiff {
+            Text(line).foregroundStyle(colorForLine(line))
+        } else {
+            Text(SyntaxHighlighter.highlight(
+                line,
+                syntax: syntax,
+                palette: .forScheme(colorScheme)
+            ))
+        }
     }
 
     private func colorForLine(_ line: String) -> Color {
