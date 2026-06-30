@@ -134,10 +134,12 @@ struct FileApprovalDetail: View {
                     .foregroundStyle(.tertiary)
             }
             ScrollView {
-                Text(payload.diff ?? payload.content ?? "")
-                    .font(.system(size: 11, design: .monospaced))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .textSelection(.enabled)
+                ColoredCodeView(
+                    text: payload.diff ?? payload.content ?? "",
+                    isDiff: payload.diff != nil,
+                    syntax: payload.syntax
+                )
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
             .frame(maxHeight: 200)
             .background(Color(nsColor: .textBackgroundColor))
