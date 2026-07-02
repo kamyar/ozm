@@ -10,7 +10,10 @@ import uuid
 from typing import NamedTuple
 
 from ozm.agent import AgentMetadata, extract_agent_metadata_from_command
+from ozm.paths import DEFAULTS, OSASCRIPT, trusted_executable
 from ozm.socket_client import send_request as _socket_send
+
+MAX_OVERRIDE_REASON_LENGTH = 500
 
 
 def _secure_tmpfile(suffix: str, content: str) -> str:
@@ -38,9 +41,12 @@ class ApprovalResult(NamedTuple):
 
 def _get_git_diff(path: str) -> str | None:
     abs_path = os.path.abspath(path)
+    git = trusted_executable("git")
+    if git is None:
+        return None
     try:
         result = subprocess.run(
-            ["git", "diff", "--no-color", "--no-ext-diff", abs_path],
+            [git, "diff", "--no-color", "--no-ext-diff", abs_path],
             capture_output=True, text=True, timeout=5,
             env={**os.environ, "GIT_CONFIG_NOSYSTEM": "1"},
         )
@@ -197,6 +203,20 @@ def request_cmd_approval(
     return ApprovalResult(approved=None)
 
 
+def _sanitize_override_reason(reason: str) -> str:
+    """Neutralize agent-controlled override text before showing it to the user.
+
+    The --reason string is authored by the agent requesting the override, so
+    strip control/bidi characters, collapse it to a single line, and cap its
+    length so it cannot spoof dialog chrome or bury the real question.
+    """
+    reason = _strip_unicode_control(str(reason))
+    reason = " ".join(reason.split())
+    if len(reason) > MAX_OVERRIDE_REASON_LENGTH:
+        reason = reason[:MAX_OVERRIDE_REASON_LENGTH] + "…"
+    return reason
+
+
 def request_override(
     command: str,
     violation: str,
@@ -204,6 +224,7 @@ def request_override(
     agent: AgentMetadata,
 ) -> ApprovalResult:
     """Ask the user for a one-time override of a blocked operation."""
+    reason = _sanitize_override_reason(reason)
     result = _try_socket_override(command, violation, reason, agent)
     if result is not None:
         return result
@@ -235,7 +256,7 @@ def _is_dark_mode() -> bool:
         return False
     try:
         result = subprocess.run(
-            ["defaults", "read", "-g", "AppleInterfaceStyle"],
+            [DEFAULTS, "read", "-g", "AppleInterfaceStyle"],
             capture_output=True, text=True,
         )
         return "dark" in result.stdout.strip().lower()
@@ -464,7 +485,7 @@ def _approve_file_macos(
         script_tmp = _secure_tmpfile(".applescript", applescript)
         try:
             result = subprocess.run(
-                ["osascript", script_tmp],
+                [OSASCRIPT, script_tmp],
                 capture_output=True,
                 text=True,
                 timeout=300,
@@ -676,7 +697,7 @@ def _approve_cmd_macos(command: str, agent: AgentMetadata) -> ApprovalResult:
         tmp = _secure_tmpfile(".applescript", applescript)
         try:
             result = subprocess.run(
-                ["osascript", tmp],
+                [OSASCRIPT, tmp],
                 capture_output=True,
                 text=True,
                 timeout=300,
@@ -757,7 +778,7 @@ def _override_macos(
         tmp = _secure_tmpfile(".applescript", applescript)
         try:
             result = subprocess.run(
-                ["osascript", tmp],
+                [OSASCRIPT, tmp],
                 capture_output=True,
                 text=True,
                 timeout=300,

@@ -146,7 +146,7 @@ def show_file(path: str, content: str | None = None) -> None:
 def ensure_executable(path: str) -> None:
     st = os.stat(path)
     if not st.st_mode & stat.S_IXUSR:
-        os.chmod(path, st.st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+        os.chmod(path, st.st_mode | stat.S_IXUSR)
 
 
 def compute_content_hash(content: str | bytes) -> str:

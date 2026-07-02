@@ -13,6 +13,7 @@ from ozm.approve import request_override
 from ozm.audit import log as audit_log
 from ozm.config import commit_config
 from ozm.exit_codes import BLOCKED, DENIED, NO_DIALOG
+from ozm.paths import trusted_executable
 
 MAX_SUBJECT_LENGTH = 72
 MAX_MESSAGE_LENGTH = 500
@@ -67,9 +68,23 @@ GLOBAL_FLAGS_WITHOUT_VALUE = {
 }
 
 
+def _git_binary() -> str:
+    """git resolved from trusted system paths, never the caller's PATH.
+
+    Policy checks (current branch, etc.) must not be answerable by a fake
+    git planted earlier on PATH.
+    """
+    git = trusted_executable("git")
+    if git is None:
+        raise click.ClickException(
+            "git not found in trusted system paths (/usr/bin, /opt/homebrew/bin, ...)"
+        )
+    return git
+
+
 def get_current_branch(global_args: list[str] | None = None) -> str | None:
     result = subprocess.run(
-        ["git", *(global_args or []), "rev-parse", "--abbrev-ref", "HEAD"],
+        [_git_binary(), *(global_args or []), "rev-parse", "--abbrev-ref", "HEAD"],
         capture_output=True,
         text=True,
     )
@@ -319,7 +334,7 @@ def git_cmd(args: tuple[str, ...]) -> None:
     """Git pass-through. Enforces rules on commit and push."""
     args_list, agent = extract_agent_metadata(list(args))
     if not args_list:
-        subprocess.run(["git"])
+        subprocess.run([_git_binary()])
         return
 
     global_args, command_args = _split_global_options(args_list)
@@ -328,7 +343,7 @@ def git_cmd(args: tuple[str, ...]) -> None:
         _handle_violation(global_violation, _git_command(args_list), None, agent)
 
     if not command_args:
-        result = subprocess.run(["git", *global_args])
+        result = subprocess.run([_git_binary(), *global_args])
         sys.exit(result.returncode)
 
     subcmd = command_args[0]
@@ -357,5 +372,5 @@ def git_cmd(args: tuple[str, ...]) -> None:
             full_cmd = _git_command([*global_args, subcmd, *rest])
             _handle_violation(violation, full_cmd, reason, agent)
 
-    result = subprocess.run(["git", *global_args, subcmd, *rest])
+    result = subprocess.run([_git_binary(), *global_args, subcmd, *rest])
     sys.exit(result.returncode)
