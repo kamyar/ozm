@@ -106,7 +106,8 @@ class AgentMetadataTests(unittest.TestCase):
                 stderr="",
             )
 
-        with patch.object(approve_mod.platform, "system", return_value="Darwin"), \
+        with patch.object(approve_mod, "_try_socket_cmd", return_value=None), \
+             patch.object(approve_mod.platform, "system", return_value="Darwin"), \
              patch.object(approve_mod.subprocess, "run", side_effect=fake_run):
             result = approve_mod.request_cmd_approval(command)
 
