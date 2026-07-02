@@ -4,12 +4,31 @@
 import os
 import json
 import re
+import stat
 from datetime import datetime, timezone
 
 import click
 
+from ozm.storage import ensure_private_dir
+
 OZM_DIR = os.path.expanduser("~/.ozm")
 AUDIT_FILE = os.path.join(OZM_DIR, "audit.log")
+
+
+def _open_audit_file() -> int:
+    """Open the audit log append-only, user-private, without following symlinks."""
+    flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    flags |= getattr(os, "O_CLOEXEC", 0)
+    fd = os.open(AUDIT_FILE, flags, 0o600)
+    try:
+        st = os.fstat(fd)
+        if stat.S_IMODE(st.st_mode) & 0o077:
+            os.fchmod(fd, 0o600)
+    except OSError:
+        os.close(fd)
+        raise
+    return fd
 
 
 def _one_line(value: str) -> str:
@@ -23,13 +42,13 @@ def log(action: str, kind: str, target: str, feedback: str | None = None) -> Non
     kind: "run", "cmd"
     target: the script path or command string
     """
-    os.makedirs(OZM_DIR, exist_ok=True)
+    ensure_private_dir(OZM_DIR, "audit directory")
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     cwd = _one_line(os.getcwd())
     line = f"{ts}  {_one_line(action):<9}  {_one_line(kind):<3}  {cwd}  {_one_line(target)}"
     if feedback:
         line += f"  # {_one_line(feedback)}"
-    with open(AUDIT_FILE, "a") as f:
+    with os.fdopen(_open_audit_file(), "a") as f:
         f.write(line + "\n")
 
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import errno
 import os
 import secrets
+import stat
 
 import yaml
 
@@ -18,6 +19,21 @@ _IGNORED_FSYNC_ERRNOS = {
 def refuse_symlink(path: str, label: str) -> None:
     if os.path.islink(path):
         raise RuntimeError(f"refusing to use symlinked {label}: {path}")
+
+
+def ensure_private_dir(path: str, label: str = "storage directory") -> None:
+    """Create path as a user-private (0700) directory, tightening it if loose."""
+    refuse_symlink(path, label)
+    os.makedirs(path, mode=0o700, exist_ok=True)
+    st = os.lstat(path)
+    if stat.S_IMODE(st.st_mode) & 0o077:
+        os.chmod(path, 0o700)
+
+
+def _tighten_directory_fd(dir_fd: int) -> None:
+    st = os.fstat(dir_fd)
+    if stat.S_IMODE(st.st_mode) & 0o077:
+        os.fchmod(dir_fd, 0o700)
 
 
 def _open_directory_no_follow(directory: str, label: str) -> int:
@@ -83,12 +99,15 @@ def _open_storage_directory(
 ) -> int:
     if parent_directory is None:
         if create:
-            os.makedirs(directory, exist_ok=True)
-        return _open_directory_no_follow(directory, directory_label)
+            os.makedirs(directory, mode=0o700, exist_ok=True)
+        dir_fd = _open_directory_no_follow(directory, directory_label)
+        _tighten_directory_fd(dir_fd)
+        return dir_fd
 
     if create:
-        os.makedirs(parent_directory, exist_ok=True)
+        os.makedirs(parent_directory, mode=0o700, exist_ok=True)
     parent_fd = _open_directory_no_follow(parent_directory, parent_label or directory_label)
+    _tighten_directory_fd(parent_fd)
     current_fd = parent_fd
     try:
         parts = _relative_directory_parts(parent_directory, directory)
@@ -100,6 +119,7 @@ def _open_storage_directory(
                 except FileExistsError:
                     pass
             child_fd = _open_directory_no_follow_at(current_fd, part, label)
+            _tighten_directory_fd(child_fd)
             os.close(current_fd)
             current_fd = child_fd
         return current_fd

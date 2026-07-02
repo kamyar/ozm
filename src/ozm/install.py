@@ -416,11 +416,11 @@ CLAUDE_HOOKS_CONFIG = {
 
 
 def _write_hook_script() -> None:
-    os.makedirs(HOOKS_DIR, exist_ok=True)
+    os.makedirs(OZM_DIR, mode=0o700, exist_ok=True)
+    os.makedirs(HOOKS_DIR, mode=0o700, exist_ok=True)
     with open(ENFORCE_HOOK, "w") as f:
         f.write(HOOK_SCRIPT)
-    st = os.stat(ENFORCE_HOOK)
-    os.chmod(ENFORCE_HOOK, st.st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    os.chmod(ENFORCE_HOOK, stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR)
     click.echo(f"  hook: {ENFORCE_HOOK}")
 
 
