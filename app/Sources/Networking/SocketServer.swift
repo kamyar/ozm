@@ -17,11 +17,22 @@ final class SocketServer: ObservableObject {
 
     func start(queue: ApprovalQueue) {
         self.queue = queue
+        // Everything this app creates (socket included) must be private to
+        // the user; also closes the bind→chmod window on the socket itself.
+        umask(0o077)
         cleanup()
 
+        // The socket directory must be private to the user: the kernel checks
+        // filesystem permissions on connect(2) for unix sockets, so a 0700
+        // directory + 0600 socket is what keeps other local users out
+        // (Network.framework exposes no LOCAL_PEERCRED-style peer check).
         let dir = (Self.socketPath as NSString).deletingLastPathComponent
         try? FileManager.default.createDirectory(
-            atPath: dir, withIntermediateDirectories: true
+            atPath: dir, withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o700]
+        )
+        try? FileManager.default.setAttributes(
+            [.posixPermissions: 0o700], ofItemAtPath: dir
         )
 
         let params = NWParameters()
@@ -34,6 +45,9 @@ final class SocketServer: ObservableObject {
                 Task { @MainActor [weak self] in
                     switch state {
                     case .ready:
+                        // Restrict connect() to the owning user before
+                        // accepting any approvals.
+                        chmod(Self.socketPath, 0o600)
                         self?.isRunning = true
                     case .failed, .cancelled:
                         self?.isRunning = false
