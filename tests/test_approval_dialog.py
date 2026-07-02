@@ -250,6 +250,54 @@ class SocketClientTests(unittest.TestCase):
 
         self.assertIsNone(result)
 
+    def test_refuses_group_or_other_writable_socket(self):
+        sock_path = f"/tmp/ozm-test-{os.getpid()}-loose.sock"
+        srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        srv.bind(sock_path)
+        self.addCleanup(srv.close)
+        self.addCleanup(lambda: os.path.exists(sock_path) and os.unlink(sock_path))
+        os.chmod(sock_path, 0o777)
+
+        self.assertFalse(socket_client._socket_is_trusted(sock_path))
+        with patch.object(socket_client, "SOCKET_PATH", sock_path):
+            result = socket_client.send_request({"version": 1, "type": "status"})
+
+        self.assertIsNone(result)
+
+    def test_refuses_regular_file_at_socket_path(self):
+        path = f"/tmp/ozm-test-{os.getpid()}-file.sock"
+        with open(path, "w") as f:
+            f.write("not a socket")
+        self.addCleanup(lambda: os.path.exists(path) and os.unlink(path))
+        os.chmod(path, 0o600)
+
+        self.assertFalse(socket_client._socket_is_trusted(path))
+
+    def test_refuses_symlinked_socket_path(self):
+        sock_path = f"/tmp/ozm-test-{os.getpid()}-real.sock"
+        link_path = f"/tmp/ozm-test-{os.getpid()}-link.sock"
+        srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        srv.bind(sock_path)
+        self.addCleanup(srv.close)
+        self.addCleanup(lambda: os.path.exists(sock_path) and os.unlink(sock_path))
+        os.chmod(sock_path, 0o600)
+        os.symlink(sock_path, link_path)
+        self.addCleanup(lambda: os.path.islink(link_path) and os.unlink(link_path))
+
+        self.assertTrue(socket_client._socket_is_trusted(sock_path))
+        self.assertFalse(socket_client._socket_is_trusted(link_path))
+
+    def test_refuses_socket_owned_by_other_uid(self):
+        sock_path = f"/tmp/ozm-test-{os.getpid()}-uid.sock"
+        srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        srv.bind(sock_path)
+        self.addCleanup(srv.close)
+        self.addCleanup(lambda: os.path.exists(sock_path) and os.unlink(sock_path))
+        os.chmod(sock_path, 0o600)
+
+        with patch.object(socket_client.os, "geteuid", return_value=os.geteuid() + 1):
+            self.assertFalse(socket_client._socket_is_trusted(sock_path))
+
 
 class SocketFallbackTests(unittest.TestCase):
     def test_request_approval_falls_back_when_socket_unavailable(self):
