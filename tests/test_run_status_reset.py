@@ -1,4 +1,5 @@
 import os
+import stat
 import subprocess
 import unittest
 from contextlib import contextmanager
@@ -142,26 +143,41 @@ class RunStatusResetTests(unittest.TestCase):
         self.assertEqual(result.exit_code, 0)
         self.assertEqual(hashes, {other_key: "other-hash"})
 
-    def test_cached_run_executes_with_absolute_script_path(self):
+    def test_cached_run_executes_private_snapshot_of_script(self):
         runner = CliRunner()
         with runner.isolated_filesystem():
             os.mkdir(".git")
             script = self.write_script("script.sh")
             script_hash = run_mod.compute_hash(script)
+            ozm_dir = os.path.abspath("ozm")
+            with open(script, "rb") as f:
+                expected_content = f.read()
 
-            with patch.object(run_mod, "load_hashes", return_value={self.tracked_key(script): script_hash}), \
-                patch.object(run_mod, "ensure_executable") as ensure_executable, \
+            captured = {}
+
+            def fake_run(argv, env=None, **_kwargs):
+                captured["argv"] = argv
+                captured["env"] = env
+                with open(argv[0], "rb") as f:
+                    captured["content"] = f.read()
+                captured["mode"] = stat.S_IMODE(os.stat(argv[0]).st_mode)
+                return subprocess.CompletedProcess(args=argv, returncode=0)
+
+            with patch.object(run_mod, "OZM_DIR", ozm_dir), \
+                patch.object(run_mod, "load_hashes", return_value={self.tracked_key(script): script_hash}), \
                 patch.object(run_mod, "audit_log"), \
-                patch.object(
-                    run_mod.subprocess,
-                    "run",
-                    return_value=subprocess.CompletedProcess(args=[], returncode=0),
-                ) as run:
+                patch.object(run_mod.subprocess, "run", side_effect=fake_run):
                 result = runner.invoke(run_mod.run_cmd, [*META, "script.sh", "--flag"])
+                snapshot_removed = not os.path.exists(captured["argv"][0])
 
         self.assertEqual(result.exit_code, 0)
-        ensure_executable.assert_called_once()
-        run.assert_called_once_with([script, "--flag"])
+        exec_dir = os.path.join(ozm_dir, "exec")
+        self.assertTrue(captured["argv"][0].startswith(exec_dir + os.sep))
+        self.assertEqual(captured["argv"][1:], ["--flag"])
+        self.assertEqual(captured["env"]["OZM_SCRIPT_PATH"], script)
+        self.assertEqual(captured["content"], expected_content)
+        self.assertEqual(captured["mode"], 0o500)
+        self.assertTrue(snapshot_removed)
 
 
 class HashStorePersistenceTests(unittest.TestCase):

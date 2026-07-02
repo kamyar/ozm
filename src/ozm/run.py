@@ -17,6 +17,7 @@ from ozm.audit import log as audit_log
 from ozm.exit_codes import CONFIG_ERROR, DENIED, NO_DIALOG, click_error
 from ozm.config import project_key
 from ozm.storage import (
+    ensure_private_dir,
     load_yaml_no_follow,
     refuse_symlink,
     save_bytes_atomic_no_follow,
@@ -71,13 +72,14 @@ def _snapshot_path(key: str) -> str:
     return os.path.join(SNAPSHOTS_DIR, slug)
 
 
-def save_snapshot(key: str, file_path: str) -> None:
+def save_snapshot(key: str, file_path: str, content: bytes | None = None) -> None:
     _refuse_symlink(OZM_DIR, "snapshot directory")
     _refuse_symlink(SNAPSHOTS_DIR, "snapshot directory")
     dest = _snapshot_path(key)
     _refuse_symlink(dest, "snapshot file")
-    with open(file_path, "rb") as f:
-        content = f.read()
+    if content is None:
+        with open(file_path, "rb") as f:
+            content = f.read()
     save_bytes_atomic_no_follow(
         dest,
         content,
@@ -99,15 +101,20 @@ def load_snapshot(key: str) -> str | None:
         return None
 
 
-def snapshot_diff(key: str, file_path: str) -> tuple[str | None, int, int]:
+def snapshot_diff(
+    key: str, file_path: str, content: str | None = None
+) -> tuple[str | None, int, int]:
     old_content = load_snapshot(key)
     if old_content is None:
         return None, 0, 0
-    try:
-        with open(file_path) as f:
-            new_content = f.read()
-    except OSError:
-        return None, 0, 0
+    if content is not None:
+        new_content = content
+    else:
+        try:
+            with open(file_path) as f:
+                new_content = f.read()
+        except OSError:
+            return None, 0, 0
     old_lines = old_content.splitlines(keepends=True)
     new_lines = new_content.splitlines(keepends=True)
     diff_lines = list(difflib.unified_diff(
@@ -122,9 +129,10 @@ def snapshot_diff(key: str, file_path: str) -> tuple[str | None, int, int]:
     return "".join(diff_lines), added, removed
 
 
-def show_file(path: str) -> None:
-    with open(path) as f:
-        content = f.read()
+def show_file(path: str, content: str | None = None) -> None:
+    if content is None:
+        with open(path) as f:
+            content = f.read()
     lines = content.splitlines()
     width = len(str(len(lines)))
     click.echo(f"\n{'=' * 60}")
@@ -179,9 +187,27 @@ def _cleanup(path: str | None) -> None:
         pass
 
 
-def _execute_script(abs_path: str, args: tuple[str, ...]) -> None:
-    ensure_executable(abs_path)
-    result = subprocess.run([abs_path, *args])
+def _execute_script(abs_path: str, args: tuple[str, ...], content: bytes) -> None:
+    """Execute the exact approved bytes, not whatever is on disk by now.
+
+    The script may sit behind the approval dialog for minutes; a concurrent
+    writer could swap its content between hashing and execution. Run a
+    user-private snapshot of the reviewed content instead of re-reading the
+    original path. The original path is exported as OZM_SCRIPT_PATH.
+    """
+    exec_dir = os.path.join(OZM_DIR, "exec")
+    ensure_private_dir(OZM_DIR, "exec directory")
+    ensure_private_dir(exec_dir, "exec directory")
+    suffix = _safe_title_suffix(os.path.basename(abs_path))
+    fd, snapshot = tempfile.mkstemp(prefix="ozm-exec-", suffix=suffix, dir=exec_dir)
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(content)
+        os.chmod(snapshot, stat.S_IRUSR | stat.S_IXUSR)
+        env = {**os.environ, "OZM_SCRIPT_PATH": abs_path}
+        result = subprocess.run([snapshot, *args], env=env)
+    finally:
+        _cleanup(snapshot)
     sys.exit(result.returncode)
 
 
@@ -203,7 +229,7 @@ def _run_reviewed_script(
     *,
     key_target: str | None = None,
     display_name: str | None = None,
-    current_hash: str | None = None,
+    content: bytes | None = None,
     cleanup_path: str | None = None,
 ) -> None:
     abs_path = resolve_path(script)
@@ -212,8 +238,13 @@ def _run_reviewed_script(
     dialog_display_path = display_name if key_target.startswith((STDIN_PREFIX, SHELL_PREFIX)) else None
     audit_target = key_target
     key = project_key(key_target)
-    if current_hash is None:
-        current_hash = compute_hash(script)
+    # Read the script exactly once; hashing, review, and execution all use
+    # this content so a concurrent writer cannot swap in different bytes.
+    if content is None:
+        with open(abs_path, "rb") as f:
+            content = f.read()
+    current_hash = compute_content_hash(content)
+    display_content = content.decode("utf-8", errors="replace")
     try:
         hashes = load_hashes()
     except (OSError, RuntimeError) as exc:
@@ -229,18 +260,19 @@ def _run_reviewed_script(
         if stored_hash == current_hash:
             audit_log("cached", "run", audit_target)
             click.echo("ozm: allowed (cached)", err=True)
-            _execute_script(abs_path, args)
+            _execute_script(abs_path, args, content)
 
         label = "NEW" if stored_hash is None else "CHANGED"
 
         snap_diff = None
         if label == "CHANGED":
-            snap_diff, _, _ = snapshot_diff(key, abs_path)
+            snap_diff, _, _ = snapshot_diff(key, abs_path, content=display_content)
 
         approval = request_approval(
             script,
             label,
             agent,
+            content=display_content,
             snapshot_diff=snap_diff,
             display_path=dialog_display_path,
         )
@@ -256,7 +288,7 @@ def _run_reviewed_script(
                     CONFIG_ERROR,
                 ) from exc
             try:
-                save_snapshot(key, abs_path)
+                save_snapshot(key, abs_path, content=content)
             except (OSError, RuntimeError):
                 pass
             audit_log("clicked", "run", audit_target, approval.feedback)
@@ -264,7 +296,7 @@ def _run_reviewed_script(
                 click.echo(f"ozm: approved {display_name} — [user] {approval.feedback}", err=True)
             else:
                 click.echo(f"ozm: approved {display_name}")
-            _execute_script(abs_path, args)
+            _execute_script(abs_path, args, content)
 
         if approval.approved is False:
             audit_log("denied", "run", audit_target, approval.feedback)
@@ -276,7 +308,7 @@ def _run_reviewed_script(
 
         audit_log("no-dialog", "run", audit_target, approval.feedback)
         click.echo(f"ozm: [{label}] {display_name}")
-        show_file(script)
+        show_file(script, content=display_content)
         if approval.feedback:
             click.echo(f"ozm: dialog error: [ozm] {approval.feedback}", err=True)
         click.echo(
@@ -315,7 +347,7 @@ def run_stdin_content(
         agent,
         key_target=f"{key_prefix}{title}",
         display_name=f"{display_prefix}:{title}",
-        current_hash=compute_content_hash(content),
+        content=content.encode(),
         cleanup_path=tmp,
     )
 
