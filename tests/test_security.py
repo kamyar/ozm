@@ -3,6 +3,7 @@
 import hashlib
 import json
 import os
+import stat
 import subprocess
 import sys
 import unittest
@@ -10,12 +11,14 @@ from unittest.mock import patch
 
 from click.testing import CliRunner
 
+from ozm import approve as approve_mod
 from ozm import cmd as cmd_mod
 from ozm import config as config_mod
 from ozm import doctor as doctor_mod
 from ozm import git as git_mod
 from ozm import install as install_mod
 from ozm import run as run_mod
+from ozm.agent import AgentMetadata
 from ozm.approve import ApprovalResult, _escape, _parse_cmd_result, _strip_unicode_control
 
 META = [
@@ -694,6 +697,73 @@ class TestH3HookIntegrity(unittest.TestCase):
             ok, msg = doctor_mod._check_hook_script()
         self.assertFalse(ok)
         self.assertIn("missing", msg)
+
+
+# ---------------------------------------------------------------------------
+# Override reason sanitization / trusted executable resolution
+# ---------------------------------------------------------------------------
+
+class TestOverrideReasonSanitization(unittest.TestCase):
+    """Agent-supplied --reason text must be neutralized before display."""
+
+    def test_strips_controls_collapses_lines_and_caps_length(self):
+        raw = "fix‮ prod\noutage\r\nnow " + "x" * 600
+        cleaned = approve_mod._sanitize_override_reason(raw)
+
+        self.assertNotIn("‮", cleaned)
+        self.assertNotIn("\n", cleaned)
+        self.assertNotIn("\r", cleaned)
+        self.assertLessEqual(
+            len(cleaned), approve_mod.MAX_OVERRIDE_REASON_LENGTH + 1
+        )
+        self.assertTrue(cleaned.startswith("fix prod outage now"))
+
+    def test_request_override_sanitizes_reason_before_any_dialog(self):
+        captured = {}
+
+        def fake_socket(command, violation, reason, agent):
+            captured["reason"] = reason
+            return ApprovalResult(approved=False)
+
+        agent = AgentMetadata("Security test", "Exercise override sanitization.")
+        with patch.object(approve_mod, "_try_socket_override", side_effect=fake_socket):
+            approve_mod.request_override(
+                "git push", "push blocked", "line1\nline2‮", agent
+            )
+
+        self.assertEqual(captured["reason"], "line1 line2")
+
+
+class TestTrustedExecutableResolution(unittest.TestCase):
+    """Policy helpers must not be resolved through the caller's PATH."""
+
+    def test_git_binary_is_absolute_trusted_path(self):
+        path = git_mod._git_binary()
+        self.assertTrue(os.path.isabs(path))
+        self.assertTrue(
+            any(path.startswith(p + os.sep) for p in
+                ("/usr/bin", "/bin", "/usr/sbin", "/sbin",
+                 "/opt/homebrew/bin", "/usr/local/bin", "/opt/local/bin"))
+        )
+
+    def test_get_git_diff_returns_none_without_trusted_git(self):
+        with patch.object(approve_mod, "trusted_executable", return_value=None):
+            self.assertIsNone(approve_mod._get_git_diff("script.py"))
+
+
+class TestEnsureExecutable(unittest.TestCase):
+    """ensure_executable must not grant group/other execute."""
+
+    def test_adds_only_user_execute_bit(self):
+        with CliRunner().isolated_filesystem():
+            with open("script.sh", "w") as f:
+                f.write("#!/bin/sh\n")
+            os.chmod("script.sh", 0o644)
+
+            run_mod.ensure_executable("script.sh")
+
+            mode = stat.S_IMODE(os.stat("script.sh").st_mode)
+        self.assertEqual(mode, 0o744)
 
 
 # ---------------------------------------------------------------------------

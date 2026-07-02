@@ -206,7 +206,9 @@ class GitGlobalOptionBypassTests(unittest.TestCase):
             result = self.invoke(["-c", "user.name=Test", "status"])
 
         self.assertEqual(result.exit_code, 0)
-        run.assert_called_once_with(["git", "-c", "user.name=Test", "status"])
+        run.assert_called_once_with(
+            [git_mod._git_binary(), "-c", "user.name=Test", "status"]
+        )
 
 
 class GitOverrideTests(unittest.TestCase):
@@ -225,7 +227,9 @@ class GitOverrideTests(unittest.TestCase):
 
         self.assertEqual(result.exit_code, 0)
         request_override.assert_called_once()
-        subprocess_mod.run.assert_called_once_with(["git", "push", "--force"])
+        subprocess_mod.run.assert_called_once_with(
+            [git_mod._git_binary(), "push", "--force"]
+        )
 
     def test_denied_override_does_not_run(self):
         with patch.object(git_mod, "get_current_branch", return_value="kamyar/topic"), \
