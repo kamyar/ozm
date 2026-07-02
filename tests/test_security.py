@@ -15,6 +15,7 @@ from ozm import config as config_mod
 from ozm import doctor as doctor_mod
 from ozm import git as git_mod
 from ozm import install as install_mod
+from ozm import run as run_mod
 from ozm.approve import ApprovalResult, _escape, _parse_cmd_result, _strip_unicode_control
 
 META = [
@@ -592,6 +593,77 @@ class TestCommandRulePersistence(unittest.TestCase):
         add_blocked.assert_called_once_with("wget example.com", global_scope=True)
         mock_sub.run.assert_not_called()
         self.assertIn("added global blocklist pattern", result.output)
+
+
+# ---------------------------------------------------------------------------
+# TOCTOU: approved content is what executes, not what's on disk at exec time
+# ---------------------------------------------------------------------------
+
+class TestRunToctou(unittest.TestCase):
+    """Content swapped between hashing/approval and execution must not run."""
+
+    def test_content_swapped_during_approval_does_not_execute(self):
+        runner = CliRunner()
+        original = "#!/usr/bin/env sh\necho original\n"
+        swapped = "#!/usr/bin/env sh\necho SWAPPED\n"
+
+        with runner.isolated_filesystem():
+            os.mkdir(".git")
+            with open("script.sh", "w") as f:
+                f.write(original)
+            script = os.path.abspath("script.sh")
+            ozm_dir = os.path.abspath("ozm")
+
+            def approve_and_swap(*_args, **_kwargs):
+                # Attacker rewrites the script while the dialog is open.
+                with open(script, "w") as f:
+                    f.write(swapped)
+                return ApprovalResult(approved=True)
+
+            executed = {}
+
+            def fake_run(argv, env=None, **_kwargs):
+                with open(argv[0]) as f:
+                    executed["content"] = f.read()
+                return subprocess.CompletedProcess(args=argv, returncode=0)
+
+            with patch.object(run_mod, "OZM_DIR", ozm_dir), \
+                 patch.object(run_mod, "HASH_FILE", os.path.join(ozm_dir, "hashes.yaml")), \
+                 patch.object(run_mod, "SNAPSHOTS_DIR", os.path.join(ozm_dir, "snapshots")), \
+                 patch.object(run_mod, "request_approval", side_effect=approve_and_swap), \
+                 patch.object(run_mod, "audit_log"), \
+                 patch.object(run_mod.subprocess, "run", side_effect=fake_run):
+                result = runner.invoke(run_mod.run_cmd, [*META, "script.sh"])
+
+        self.assertEqual(result.exit_code, 0)
+        self.assertEqual(executed["content"], original)
+
+    def test_approval_dialog_shows_hashed_content_not_disk_content(self):
+        """request_approval must receive the in-memory content that will run."""
+        runner = CliRunner()
+        original = "#!/usr/bin/env sh\necho original\n"
+
+        with runner.isolated_filesystem():
+            os.mkdir(".git")
+            with open("script.sh", "w") as f:
+                f.write(original)
+            ozm_dir = os.path.abspath("ozm")
+
+            seen = {}
+
+            def deny(_script, _label, _agent, **kwargs):
+                seen["content"] = kwargs.get("content")
+                return ApprovalResult(approved=False)
+
+            with patch.object(run_mod, "OZM_DIR", ozm_dir), \
+                 patch.object(run_mod, "HASH_FILE", os.path.join(ozm_dir, "hashes.yaml")), \
+                 patch.object(run_mod, "SNAPSHOTS_DIR", os.path.join(ozm_dir, "snapshots")), \
+                 patch.object(run_mod, "request_approval", side_effect=deny), \
+                 patch.object(run_mod, "audit_log"):
+                result = runner.invoke(run_mod.run_cmd, [*META, "script.sh"])
+
+        self.assertNotEqual(result.exit_code, 0)
+        self.assertEqual(seen["content"], original)
 
 
 # ---------------------------------------------------------------------------

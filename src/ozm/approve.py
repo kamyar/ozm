@@ -87,14 +87,16 @@ def _try_socket_file(
     label: str,
     agent: AgentMetadata,
     diff: str | None,
+    content: str | None = None,
 ) -> ApprovalResult | None:
     abs_path = os.path.abspath(script)
-    try:
-        with open(abs_path) as f:
-            content = f.read()
-        line_count = content.count("\n") + (1 if content and not content.endswith("\n") else 0)
-    except OSError:
-        return None
+    if content is None:
+        try:
+            with open(abs_path) as f:
+                content = f.read()
+        except OSError:
+            return None
+    line_count = content.count("\n") + (1 if content and not content.endswith("\n") else 0)
     request = {
         "version": 1,
         "id": str(uuid.uuid4()),
@@ -151,18 +153,26 @@ def request_approval(
     label: str,
     agent: AgentMetadata,
     *,
+    content: str | None = None,
     snapshot_diff: str | None = None,
     display_path: str | None = None,
 ) -> ApprovalResult:
-    """Ask the user to review and approve a script via OS-native UI."""
+    """Ask the user to review and approve a script via OS-native UI.
+
+    When `content` is given, the review dialogs display exactly that content
+    instead of re-reading the script from disk, so what the user approves is
+    what the caller will execute.
+    """
     diff = _get_git_diff(script) if label == "CHANGED" else None
     if diff is None and snapshot_diff is not None:
         diff = snapshot_diff
-    result = _try_socket_file(script, label, agent, diff)
+    result = _try_socket_file(script, label, agent, diff, content=content)
     if result is not None:
         return result
     if platform.system() == "Darwin":
-        return _approve_file_macos(script, label, agent, diff=diff, display_path=display_path)
+        return _approve_file_macos(
+            script, label, agent, diff=diff, display_path=display_path, content=content
+        )
     return ApprovalResult(approved=None)
 
 
@@ -233,7 +243,7 @@ def _is_dark_mode() -> bool:
         return False
 
 
-def _render_rtf(path: str) -> str | None:
+def _render_rtf(path: str, content: str | None = None) -> str | None:
     try:
         from pygments import highlight
         from pygments.formatters import RtfFormatter
@@ -241,8 +251,9 @@ def _render_rtf(path: str) -> str | None:
     except ImportError:
         return None
 
-    with open(path) as f:
-        content = f.read()
+    if content is None:
+        with open(path) as f:
+            content = f.read()
 
     try:
         lexer = get_lexer_for_filename(path)
@@ -403,15 +414,17 @@ def _approve_file_macos(
     *,
     diff: str | None = None,
     display_path: str | None = None,
+    content: str | None = None,
 ) -> ApprovalResult:
     abs_path = os.path.abspath(script)
     shown_path = display_path or abs_path
-    line_count = _count_lines(script)
+    line_count = len(content.splitlines()) if content is not None else _count_lines(script)
     title = f"[{label}] {agent.name}"
     agent_context = _agent_context(agent)
 
     rtf_tmp = None
     diff_tmp = None
+    plain_tmp = None
 
     if diff:
         subtitle = f"{agent_context} — {shown_path} — diff ({line_count} lines total)"
@@ -426,11 +439,15 @@ def _approve_file_macos(
             set_section = _SET_PLAIN
     else:
         subtitle = f"{agent_context} — {shown_path} — {line_count} lines"
-        rtf_content = _render_rtf(abs_path)
+        rtf_content = _render_rtf(abs_path, content)
         if rtf_content:
             rtf_tmp = _secure_tmpfile(".rtf", rtf_content)
             load_section = _LOAD_RTF.replace("__RTFPATH__", _escape(rtf_tmp))
             set_section = _SET_RTF
+        elif content is not None:
+            plain_tmp = _secure_tmpfile(".txt", content)
+            load_section = _LOAD_PLAIN.replace("__FILEPATH__", _escape(plain_tmp))
+            set_section = _SET_PLAIN
         else:
             load_section = _LOAD_PLAIN.replace("__FILEPATH__", _escape(abs_path))
             set_section = _SET_PLAIN
@@ -457,7 +474,7 @@ def _approve_file_macos(
     except (subprocess.TimeoutExpired, OSError):
         return ApprovalResult(approved=None)
     finally:
-        for tmp in (rtf_tmp, diff_tmp):
+        for tmp in (rtf_tmp, diff_tmp, plain_tmp):
             if tmp:
                 try:
                     os.unlink(tmp)
