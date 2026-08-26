@@ -37,6 +37,8 @@ print("hello")
 echo "hello"
 ```
 
+**One-command scripts are rejected.** The shebang, blank lines, and comment-only lines do not count as executable lines. If only one executable line remains, Ozm stops before cache and approval checks. Run the command directly with `ozm cmd`, `ozm gh`, or `ozm git`. Use `ozm bash --command` only when the command requires shell syntax. Use `ozm run` for scripts that contain real multi-step logic.
+
 ### Flow
 
 ```mermaid
@@ -45,7 +47,9 @@ flowchart TD
     B -->|No| M[Reject with memory reminder]
     B -->|Yes| C{File exists?}
     C -->|No| E[Error: not found]
-    C -->|Yes| D{Hash matches stored?}
+    C -->|Yes| O{Only one executable line?}
+    O -->|Yes| P[Reject: use a direct ozm command]
+    O -->|No| D{Hash matches stored?}
     D -->|Yes| X[Execute immediately]
     D -->|No| F{New or changed?}
     F -->|New| G[Show file content in dialog]

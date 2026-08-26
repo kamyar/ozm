@@ -25,7 +25,7 @@ class RunStatusResetTests(unittest.TestCase):
         if directory:
             os.makedirs(directory, exist_ok=True)
         with open(path, "w") as f:
-            f.write(f"#!/usr/bin/env sh\n{body}\n")
+            f.write(f"#!/usr/bin/env sh\n{body}\n:\n")
         return os.path.abspath(path)
 
     @contextmanager
@@ -178,6 +178,74 @@ class RunStatusResetTests(unittest.TestCase):
         self.assertEqual(captured["content"], expected_content)
         self.assertEqual(captured["mode"], 0o500)
         self.assertTrue(snapshot_removed)
+
+
+class OneCommandScriptTests(unittest.TestCase):
+    def test_run_blocks_one_command_before_cache_or_approval(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            os.mkdir(".git")
+            with open("search.sh", "w") as f:
+                f.write(
+                    "#!/usr/bin/env bash\n"
+                    "# Do not count comments as commands.\n"
+                    "\n"
+                    "rg -n TODO src\n"
+                )
+            target = os.path.abspath("search.sh")
+
+            with patch.object(run_mod, "load_hashes") as load_hashes, \
+                 patch.object(run_mod, "request_approval") as request_approval, \
+                 patch.object(run_mod, "_execute_script") as execute_script, \
+                 patch.object(run_mod, "audit_log") as audit_log:
+                result = runner.invoke(run_mod.run_cmd, [*META, "search.sh"])
+
+        self.assertEqual(result.exit_code, run_mod.BLOCKED)
+        self.assertIn("one-command scripts are not allowed", result.output)
+        self.assertIn("ozm cmd", result.output)
+        self.assertIn("ozm gh", result.output)
+        self.assertIn("ozm git", result.output)
+        self.assertIn("ozm bash --command", result.output)
+        load_hashes.assert_not_called()
+        request_approval.assert_not_called()
+        execute_script.assert_not_called()
+        audit_log.assert_called_once_with(
+            "blocked",
+            "run",
+            target,
+            "one-command scripts must run as direct ozm commands",
+        )
+
+    def test_two_command_script_continues_to_normal_approval(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            os.mkdir(".git")
+            with open("inspect.sh", "w") as f:
+                f.write("#!/usr/bin/env bash\nrg -n TODO src\nrg -n FIXME src\n")
+
+            with patch.object(run_mod, "load_hashes", return_value={}), \
+                 patch.object(
+                     run_mod,
+                     "request_approval",
+                     return_value=ApprovalResult(approved=False),
+                 ) as request_approval, \
+                 patch.object(run_mod, "_execute_script") as execute_script, \
+                 patch.object(run_mod, "audit_log"):
+                result = runner.invoke(run_mod.run_cmd, [*META, "inspect.sh"])
+
+        self.assertEqual(result.exit_code, run_mod.DENIED)
+        request_approval.assert_called_once()
+        execute_script.assert_not_called()
+
+    def test_executable_line_count_ignores_shebang_comments_and_blanks(self):
+        content = (
+            "#!/usr/bin/env python3\n"
+            "# Explain the operation.\n"
+            "\n"
+            "print('one')\n"
+        )
+
+        self.assertEqual(run_mod._executable_lines(content), ["print('one')"])
 
 
 class HashStorePersistenceTests(unittest.TestCase):
@@ -384,7 +452,7 @@ class HashStorePersistenceTests(unittest.TestCase):
 class ApprovalCacheBehaviorTests(unittest.TestCase):
     def write_script(self, path: str, body: str = "echo hi") -> str:
         with open(path, "w") as f:
-            f.write(f"#!/usr/bin/env sh\n{body}\n")
+            f.write(f"#!/usr/bin/env sh\n{body}\n:\n")
         return os.path.abspath(path)
 
     def symlinked_hash_file(self) -> tuple[str, str, str]:

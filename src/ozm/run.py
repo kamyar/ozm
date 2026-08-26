@@ -14,7 +14,7 @@ import click
 from ozm.agent import extract_agent_metadata
 from ozm.approve import request_approval
 from ozm.audit import log as audit_log
-from ozm.exit_codes import CONFIG_ERROR, DENIED, NO_DIALOG, click_error
+from ozm.exit_codes import BLOCKED, CONFIG_ERROR, DENIED, NO_DIALOG, click_error
 from ozm.config import project_key
 from ozm.storage import (
     ensure_private_dir,
@@ -211,6 +211,18 @@ def _execute_script(abs_path: str, args: tuple[str, ...], content: bytes) -> Non
     sys.exit(result.returncode)
 
 
+def _executable_lines(content: str) -> list[str]:
+    """Return script lines that contain executable content."""
+    lines = content.splitlines()
+    if lines and lines[0].startswith("#!"):
+        lines = lines[1:]
+    return [
+        line
+        for line in lines
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+
+
 def _display_key_target(root: str, target: str) -> str:
     if not os.path.isabs(target):
         return target
@@ -245,6 +257,20 @@ def _run_reviewed_script(
             content = f.read()
     current_hash = compute_content_hash(content)
     display_content = content.decode("utf-8", errors="replace")
+    if (
+        not key_target.startswith(SHELL_PREFIX)
+        and len(_executable_lines(display_content)) == 1
+    ):
+        reason = "one-command scripts must run as direct ozm commands"
+        audit_log("blocked", "run", audit_target, reason)
+        _cleanup(cleanup_path)
+        raise click_error(
+            "one-command scripts are not allowed. Run the command directly "
+            "instead of writing a script. Use 'ozm cmd ...' for an arbitrary "
+            "command, 'ozm gh ...' for GitHub, or 'ozm git ...' for Git. Use "
+            "'ozm bash --command ...' only when shell syntax is required.",
+            BLOCKED,
+        )
     try:
         hashes = load_hashes()
     except (OSError, RuntimeError) as exc:
@@ -364,7 +390,8 @@ def run_cmd(from_stdin: bool, title: str | None, items: tuple[str, ...]) -> None
 
     The source script needs a shebang, but it does not need an executable file
     mode. Do not run chmod +x before this command. ozm executes the reviewed
-    content from a private, user-executable snapshot.
+    content from a private, user-executable snapshot. Scripts with only one
+    executable line are rejected; run that command directly through ozm.
     """
     parts, agent = extract_agent_metadata(list(items))
     if from_stdin:
