@@ -10,6 +10,7 @@ import click
 from ozm.audit import log_cmd
 from ozm.run import reset_cmd, run_cmd, status_cmd
 from ozm.git import git_cmd
+from ozm.gh import gh_cmd
 from ozm.install import install_cmd
 from ozm.cmd import cmd_cmd
 from ozm.app import app_cmd
@@ -143,6 +144,8 @@ def trust_cmd(check_only: bool, json_output: bool) -> None:
 
 
 TIPS = [
+    "Use 'ozm gh' for GitHub operations. Proven reads run directly, while "
+    "writes and unknown operations keep the normal approval checks.",
     "Do not run chmod +x before 'ozm run'. A script only needs a shebang; ozm "
     "executes reviewed content from a private, user-executable snapshot. Use "
     "chmod only when the source file mode itself must change.",
@@ -194,6 +197,7 @@ cli.add_command(run_cmd, "run")
 cli.add_command(status_cmd, "status")
 cli.add_command(reset_cmd, "reset")
 cli.add_command(git_cmd, "git")
+cli.add_command(gh_cmd, "gh")
 cli.add_command(install_cmd, "install")
 cli.add_command(cmd_cmd, "cmd")
 cli.add_command(shell_cmd, "shell")

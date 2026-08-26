@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import os
 
 
 READ_ONLY_REASON = "github graphql query"
@@ -35,7 +34,7 @@ def read_only_reason(args: list[str]) -> str | None:
 def _extract_request(args: list[str]) -> tuple[str, str | None] | None:
     if len(args) < 3:
         return None
-    if os.path.basename(args[0]) != "gh" or args[1:3] != ["api", "graphql"]:
+    if args[0] != "gh" or args[1:3] != ["api", "graphql"]:
         return None
 
     query = None

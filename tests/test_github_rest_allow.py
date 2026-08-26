@@ -38,7 +38,7 @@ class GitHubRESTParserTests(unittest.TestCase):
         self.assertEqual(github_api.read_only_reason(args), "github rest GET")
 
     def test_explicit_head_is_read_only(self):
-        args = ["/opt/homebrew/bin/gh", "api", "-XHEAD", "/rate_limit"]
+        args = ["gh", "api", "-XHEAD", "/rate_limit"]
 
         request = github_api.extract_rest_request(args)
 
@@ -79,8 +79,35 @@ class GitHubRESTParserTests(unittest.TestCase):
             ["gh", "api", "-X", "GET", "-H", "@headers.txt", "rate_limit"],
             ["gh", "api", "--unknown-option", "rate_limit"],
             ["gh", "api", "https://example.com/collect"],
+            ["/tmp/gh", "api", "rate_limit"],
             ["gh", "api", "rate_limit", "extra-operand"],
             ["gh", "api", "graphql"],
+        ]
+
+        for args in cases:
+            with self.subTest(args=args):
+                self.assertIsNone(github_api.read_only_reason(args))
+
+
+class GitHubHighLevelReadTests(unittest.TestCase):
+    def test_known_high_level_reads_are_auto_allowed(self):
+        cases = [
+            (["gh", "pr", "checks", "123"], "github pr checks"),
+            (["gh", "repo", "view", "doordash/pedregal"], "github repo view"),
+            (["gh", "search", "code", "PreviewOrderV2"], "github search code"),
+            (["gh", "project", "item-list", "155"], "github project item-list"),
+        ]
+
+        for args, reason in cases:
+            with self.subTest(args=args):
+                self.assertEqual(github_api.read_only_reason(args), reason)
+
+    def test_high_level_writes_are_not_auto_allowed(self):
+        cases = [
+            ["gh", "pr", "comment", "123", "--body", "hello"],
+            ["gh", "pr", "edit", "123", "--title", "new"],
+            ["gh", "issue", "close", "123"],
+            ["gh", "project", "item-add", "155", "--url", "https://example.com"],
         ]
 
         for args in cases:
