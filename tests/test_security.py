@@ -100,6 +100,149 @@ class TestCommandSpecificRejection(unittest.TestCase):
         self.assertFalse(result)
 
 
+class TestRecentChmodConfirmation(unittest.TestCase):
+    """Recent chmod targets require an explicit agent confirmation flag."""
+
+    def test_chmod_target_parsing_handles_modes_options_and_env(self):
+        self.assertEqual(
+            cmd_mod._chmod_targets(
+                ["env", "LC_ALL=C", "/bin/chmod", "-Rv", "u+x", "one", "two"]
+            ),
+            ["one", "two"],
+        )
+        self.assertEqual(
+            cmd_mod._chmod_targets(["chmod", "-x", "script.sh"]),
+            ["script.sh"],
+        )
+        self.assertEqual(
+            cmd_mod._chmod_targets(
+                ["chmod", "--reference=reference.sh", "script.sh"]
+            ),
+            ["script.sh"],
+        )
+
+    def test_recent_chmod_is_blocked_before_allowlist_or_cache(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            with open("script.sh", "w") as f:
+                f.write("#!/usr/bin/env sh\n")
+
+            with patch.object(cmd_mod, "is_command_blocked") as is_blocked, \
+                 patch.object(cmd_mod, "is_command_allowed") as is_allowed, \
+                 patch.object(cmd_mod, "load_hashes") as load_hashes, \
+                 patch.object(cmd_mod, "_run_command") as run_command, \
+                 patch.object(cmd_mod, "audit_log") as audit_log:
+                result = runner.invoke(
+                    cmd_mod.cmd_cmd,
+                    [*META, "chmod", "+x", "script.sh"],
+                )
+
+        self.assertEqual(result.exit_code, cmd_mod.BLOCKED)
+        self.assertIn("recently created or edited", result.output)
+        self.assertIn("Do not use chmod", result.output)
+        self.assertIn("--confirm-recent-chmod", result.output)
+        is_blocked.assert_not_called()
+        is_allowed.assert_not_called()
+        load_hashes.assert_not_called()
+        run_command.assert_not_called()
+        audit_log.assert_called_once()
+
+    def test_confirmation_flag_is_removed_before_chmod_runs(self):
+        runner = CliRunner()
+        completed = subprocess.CompletedProcess(args=[], returncode=0)
+        with runner.isolated_filesystem():
+            with open("script.sh", "w") as f:
+                f.write("#!/usr/bin/env sh\n")
+
+            with patch.object(cmd_mod, "is_command_blocked", return_value=None), \
+                 patch.object(cmd_mod, "is_command_allowed", return_value=True), \
+                 patch.object(cmd_mod, "_run_command", return_value=completed) as run_command, \
+                 patch.object(cmd_mod, "audit_log"):
+                result = runner.invoke(
+                    cmd_mod.cmd_cmd,
+                    [
+                        "--confirm-recent-chmod",
+                        *META,
+                        "chmod",
+                        "+x",
+                        "script.sh",
+                    ],
+                )
+
+        self.assertEqual(result.exit_code, 0)
+        run_command.assert_called_once_with(["chmod", "+x", "script.sh"])
+
+    def test_old_chmod_target_does_not_require_confirmation(self):
+        runner = CliRunner()
+        completed = subprocess.CompletedProcess(args=[], returncode=0)
+        with runner.isolated_filesystem():
+            with open("script.sh", "w") as f:
+                f.write("#!/usr/bin/env sh\n")
+            old = cmd_mod.time.time() - cmd_mod.RECENT_CHMOD_WINDOW_SECONDS - 1
+            os.utime("script.sh", (old, old))
+
+            with patch.object(cmd_mod, "is_command_blocked", return_value=None), \
+                 patch.object(cmd_mod, "is_command_allowed", return_value=True), \
+                 patch.object(cmd_mod, "_run_command", return_value=completed) as run_command, \
+                 patch.object(cmd_mod, "audit_log"):
+                result = runner.invoke(
+                    cmd_mod.cmd_cmd,
+                    [*META, "chmod", "+x", "script.sh"],
+                )
+
+        self.assertEqual(result.exit_code, 0)
+        run_command.assert_called_once_with(["chmod", "+x", "script.sh"])
+
+    def test_dialog_edit_to_recent_chmod_requires_confirmation(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            with open("script.sh", "w") as f:
+                f.write("#!/usr/bin/env sh\n")
+
+            with patch.object(cmd_mod, "is_command_blocked", return_value=None), \
+                 patch.object(cmd_mod, "is_command_allowed", return_value=False), \
+                 patch.object(cmd_mod, "load_hashes", return_value={}), \
+                 patch.object(
+                     cmd_mod,
+                     "request_cmd_approval",
+                     return_value=ApprovalResult(
+                         approved=True,
+                         command="chmod +x script.sh",
+                     ),
+                 ), \
+                 patch.object(cmd_mod, "_run_command") as run_command, \
+                 patch.object(cmd_mod, "audit_log"):
+                result = runner.invoke(
+                    cmd_mod.cmd_cmd,
+                    [*META, "unknown-tool", "hello"],
+                )
+
+        self.assertEqual(
+            result.exit_code,
+            cmd_mod.BLOCKED,
+            repr(result.exception),
+        )
+        self.assertIn("--confirm-recent-chmod", result.output)
+        run_command.assert_not_called()
+
+    def test_cmd_and_run_help_explain_chmod_behavior(self):
+        cmd_help = CliRunner().invoke(cmd_mod.cmd_cmd, ["--help"])
+        run_help = CliRunner().invoke(run_mod.run_cmd, ["--help"])
+
+        self.assertEqual(cmd_help.exit_code, 0)
+        self.assertIn("--confirm-recent-chmod", cmd_help.output)
+        self.assertIn(
+            "private executable snapshot",
+            " ".join(cmd_help.output.split()),
+        )
+        self.assertEqual(run_help.exit_code, 0)
+        self.assertIn("chmod +x", run_help.output)
+        self.assertIn(
+            "user-executable snapshot",
+            " ".join(run_help.output.split()),
+        )
+
+
 class TestSedAllowlistRejection(unittest.TestCase):
     """sed must never be allowlisted because it can edit files in-place."""
 

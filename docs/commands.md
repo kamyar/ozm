@@ -25,7 +25,7 @@ $ ozm run --agent-name "Deploy production" --agent-description "Run the reviewed
 # executes immediately, no prompt
 ```
 
-**Scripts must have a shebang.** ozm executes scripts directly, so the first line must declare the interpreter:
+**Scripts must have a shebang.** ozm executes scripts directly, so the first line must declare the interpreter. The source file does not need an executable file mode. Do not run `chmod +x` before `ozm run`; ozm executes the reviewed content from a private, user-executable snapshot.
 
 ```python
 #!/usr/bin/env python3
@@ -91,6 +91,14 @@ ozm: use 'ozm run --agent-name "Run script" --agent-description "Try to execute 
 **Agent metadata:** `--agent-name` is the short work name shown in the dialog. `--agent-description` must be exactly one line describing what the agent is trying to do. Missing, empty, multiline, or overlong metadata is rejected before execution, with an instruction for the agent to write the requirement to memory before retrying.
 
 **Disallowed commands:** `sed`, `gsed`, and `rg --pre` are blocked even when they appear in `allowed_commands`, because they can edit files in-place or execute hidden preprocessing. Use `rg` without `--pre` for searching, `cat`/`nl`/`head`/`tail` for viewing, or write a small reviewed script and run it with `ozm run <script>` for transformations.
+
+**Recent `chmod` safeguard:** When `chmod` targets a file modified in the last 10 minutes, ozm stops before config and approval-cache checks. A script does not need `chmod +x` for `ozm run`. If the source file mode itself must change, re-run the command with `--confirm-recent-chmod`:
+
+```bash
+ozm cmd --confirm-recent-chmod --agent-name "Mark launcher executable" --agent-description "Persist the executable bit in the repository." chmod +x scripts/launcher.sh
+```
+
+The confirmation flag does not approve the command. Normal blocklist, allowlist, cache, and approval checks still apply.
 
 **Read-only GitHub GraphQL:** `gh api graphql -f query=...` requests are auto-allowed when ozm can prove the selected operation is a query. Mutations, file-backed queries, malformed documents, and ambiguous multi-operation requests still go through normal approval.
 

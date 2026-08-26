@@ -6,6 +6,7 @@ All script execution and git operations must go through `ozm`.
 
 - **Always identify the agent work:** every `ozm run`, `ozm cmd`, and `ozm git` invocation must include `--agent-name "<what you are working on>"` and `--agent-description "<one-line intent>"`.
 - **Run scripts:** `ozm run --agent-name "<work>" --agent-description "<intent>" <script> [args...]` — never `python`, `bash`, `./`, or `uv run` directly
+- **Do not chmod scripts for ozm:** `ozm run` executes a private executable snapshot. The source script only needs a shebang. Use `chmod` only when the source file mode itself must change.
 - **Run commands:** `ozm cmd --agent-name "<work>" --agent-description "<intent>" <command> [args...]` — for arbitrary commands (e.g. `ozm cmd --agent-name "Install deps" --agent-description "Install editable package dependencies." uv pip install -e .`)
 - **Avoid sed:** `sed`/`gsed` are blocked because they can edit files in-place. Use `rg` for searching, `cat`/`nl`/`head`/`tail` for viewing, or `ozm run <script>` for transformations.
 - **Avoid curl:** `curl` is blocked by default. Install HTTPie with `uv tool install httpie` and use explicit methods (e.g. `http GET <url>`, `http POST <url> key=value`). For complex requests, write a reviewed Python script using `httpx` (or similar) and run it with `ozm run <script>`.

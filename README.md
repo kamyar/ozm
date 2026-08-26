@@ -94,7 +94,7 @@ Use `ozm run` for scripts, not `python script.py`, `bash script.sh`, `uv run`, o
 ozm run --agent-name "Run tests" --agent-description "Execute the reviewed test script." ./scripts/test.sh
 ```
 
-Scripts must have a shebang. The first approval stores the script's SHA-256 hash under the current project. Unchanged scripts run without prompting; changed scripts show a diff against the last approved snapshot before they can run again.
+Scripts must have a shebang, but the source file does not need an executable file mode. Do not run `chmod +x` before `ozm run`; ozm executes the reviewed content from a private, user-executable snapshot. The first approval stores the script's SHA-256 hash under the current project. Unchanged scripts run without prompting; changed scripts show a diff against the last approved snapshot before they can run again.
 
 ### Commands: `ozm cmd`
 
@@ -105,7 +105,7 @@ ozm cmd --agent-name "Install deps" --agent-description "Install project depende
 ozm cmd --agent-name "Check API" --agent-description "Call the service health endpoint." curl https://api.example.com/health
 ```
 
-`ozm cmd` executes argv directly rather than through a shell. It detects script execution and redirects the agent to `ozm run`, refuses `ozm cmd git ...` in favor of `ozm git`, and hard-blocks cases that are unsafe to blanket approve, including `sed`, `gsed`, and `rg --pre`.
+`ozm cmd` executes argv directly rather than through a shell. It detects script execution and redirects the agent to `ozm run`, refuses `ozm cmd git ...` in favor of `ozm git`, and hard-blocks cases that are unsafe to blanket approve, including `sed`, `gsed`, and `rg --pre`. When `chmod` targets a file modified in the last 10 minutes, ozm requires `--confirm-recent-chmod` before normal command policy checks continue.
 
 Read-only GitHub GraphQL requests such as `gh api graphql -f query=...` are recognized semantically and can run without an approval dialog when the selected operation is definitely a query. Mutations, file-backed queries, malformed documents, or ambiguous multi-operation requests still require review.
 
