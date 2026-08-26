@@ -37,6 +37,17 @@ def _bundled_binary() -> str | None:
     return None
 
 
+def _launch_detached(argv: list[str]) -> None:
+    """Launch the app independently of the invoking terminal or agent."""
+    subprocess.Popen(
+        argv,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+
+
 @click.group("app")
 def app_cmd():
     """Manage the ozm menu bar app."""
@@ -48,13 +59,13 @@ def app_start():
     # Prefer a local dev build, then the binary bundled in the wheel.
     binary = _dev_binary() or _bundled_binary()
     if binary:
-        subprocess.Popen([binary])
+        _launch_detached([binary])
         click.echo(f"ozm: launched {binary}")
         return
 
     app = _app_path()
     if os.path.isdir(app):
-        subprocess.Popen(["open", app])
+        _launch_detached(["open", app])
         click.echo(f"ozm: launched {app}")
         return
 
