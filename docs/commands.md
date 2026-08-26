@@ -100,7 +100,9 @@ ozm cmd --confirm-recent-chmod --agent-name "Mark launcher executable" --agent-d
 
 The confirmation flag does not approve the command. Normal blocklist, allowlist, cache, and approval checks still apply.
 
-**Read-only GitHub GraphQL:** `gh api graphql -f query=...` requests are auto-allowed when ozm can prove the selected operation is a query. Mutations, file-backed queries, malformed documents, and ambiguous multi-operation requests still go through normal approval.
+**Read-only GitHub API:** Unambiguous REST `GET` and `HEAD` requests are auto-allowed. Ozm infers an implicit `GET` only when the command has one relative endpoint and no body-producing field or input flag. Explicit writes, ambiguous or duplicate methods, file-backed fields or input, unsafe method-override headers, unknown options, and absolute URLs go through normal approval.
+
+`gh api graphql -f query=...` requests are auto-allowed when ozm can prove the selected operation is a query. Mutations, file-backed queries, malformed documents, and ambiguous multi-operation requests still go through normal approval.
 
 **Approval order:**
 
