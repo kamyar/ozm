@@ -143,6 +143,9 @@ def trust_cmd(check_only: bool, json_output: bool) -> None:
 
 
 TIPS = [
+    "Do not run chmod +x before 'ozm run'. A script only needs a shebang; ozm "
+    "executes reviewed content from a private, user-executable snapshot. Use "
+    "chmod only when the source file mode itself must change.",
     "Batch your work: instead of running many single commands, if you already "
     "know the sequence of commands you'll need, put them in a script with a "
     "shebang (e.g. #!/usr/bin/env bash) and run it once with 'ozm run <script>'.",

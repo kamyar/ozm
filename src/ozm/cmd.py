@@ -7,6 +7,7 @@ import re
 import shlex
 import subprocess
 import sys
+import time
 
 import click
 
@@ -15,6 +16,7 @@ from ozm.approve import request_cmd_approval, request_override
 from ozm.audit import log as audit_log
 from ozm.exit_codes import BLOCKED, CONFIG_ERROR, DENIED, NO_DIALOG, click_error
 from ozm.config import (
+    _command_start_index,
     add_allowed_command,
     add_blocked_command,
     command_name,
@@ -29,7 +31,10 @@ from ozm.github_graphql import read_only_reason as github_graphql_read_only_reas
 from ozm.run import load_hashes, save_hashes
 
 CMD_PREFIX = "cmd:"
+RECENT_CHMOD_WINDOW_SECONDS = 10 * 60
+CONFIRM_RECENT_CHMOD_FLAG = "--confirm-recent-chmod"
 SAFE_READ_ONLY_COMMANDS = {"echo", "printf", "pwd", "date", "true", "false", "test"}
+_CHMOD_SHORT_OPTIONS = frozenset("cfhRvHLP")
 
 
 def _cmd_hash(command: str) -> str:
@@ -77,6 +82,113 @@ def _edited_argv(command: str) -> list[str]:
     if not argv:
         raise click.ClickException("edited command is empty")
     return argv
+
+
+def _effective_chmod_args(args: list[str]) -> list[str]:
+    command = shlex.join(args)
+    if command_name(command) != "chmod":
+        return []
+    parts = command_parts(command)
+    index = _command_start_index(parts)
+    if index is None:
+        return []
+    return parts[index + 1:]
+
+
+def _is_chmod_short_option(arg: str) -> bool:
+    return (
+        len(arg) > 1
+        and arg.startswith("-")
+        and not arg.startswith("--")
+        and set(arg[1:]).issubset(_CHMOD_SHORT_OPTIONS)
+    )
+
+
+def _chmod_targets(args: list[str]) -> list[str]:
+    """Return chmod target operands, excluding its mode and option values."""
+    chmod_args = _effective_chmod_args(args)
+    if not chmod_args:
+        return []
+
+    uses_reference = False
+    index = 0
+    while index < len(chmod_args):
+        arg = chmod_args[index]
+        if arg == "--":
+            index += 1
+            if uses_reference:
+                return chmod_args[index:]
+            if index >= len(chmod_args):
+                return []
+            return chmod_args[index + 1:]
+        if arg == "--reference":
+            uses_reference = True
+            index += 2
+            continue
+        if arg.startswith("--reference="):
+            uses_reference = True
+            index += 1
+            continue
+        if arg.startswith("--") or _is_chmod_short_option(arg):
+            index += 1
+            continue
+        if uses_reference:
+            return [item for item in chmod_args[index:] if item != "--"]
+        return [item for item in chmod_args[index + 1:] if item != "--"]
+    return []
+
+
+def _recent_chmod_targets(
+    args: list[str],
+    *,
+    now: float | None = None,
+) -> list[str]:
+    now = time.time() if now is None else now
+    recent = []
+    for target in _chmod_targets(args):
+        try:
+            modified_at = os.stat(target).st_mtime
+        except OSError:
+            continue
+        if now - modified_at <= RECENT_CHMOD_WINDOW_SECONDS:
+            recent.append(target)
+    return recent
+
+
+def _require_recent_chmod_confirmation(
+    args: list[str],
+    *,
+    confirmed: bool,
+) -> None:
+    recent = _recent_chmod_targets(args)
+    if confirmed or not recent:
+        return
+
+    command = shlex.join(args)
+    audit_log(
+        "blocked",
+        "cmd",
+        command,
+        "chmod targets a recently created or edited file",
+    )
+    targets = shlex.join(recent)
+    click.echo(f"ozm: blocked chmod for recently created or edited file(s): {targets}", err=True)
+    click.echo(
+        "ozm: Do not use chmod only to prepare a script for 'ozm run'. "
+        "ozm runs a private executable snapshot; the source file only needs a shebang.",
+        err=True,
+    )
+    click.echo(
+        "ozm: If the file mode change is intentional, re-run with "
+        f"{CONFIRM_RECENT_CHMOD_FLAG} before chmod:",
+        err=True,
+    )
+    click.echo(
+        "ozm cmd --confirm-recent-chmod --agent-name \"<work>\" "
+        "--agent-description \"<intent>\" chmod ...",
+        err=True,
+    )
+    sys.exit(BLOCKED)
 
 
 WRAPPERS = {"uv", "npx", "bunx", "poetry", "pipx", "run", "exec"}
@@ -141,9 +253,19 @@ def _find_script_in_args(args: tuple[str, ...]) -> tuple[str, str] | None:
     "cmd",
     context_settings={"ignore_unknown_options": True, "allow_extra_args": True},
 )
+@click.option(
+    CONFIRM_RECENT_CHMOD_FLAG,
+    is_flag=True,
+    help="Confirm an intentional chmod of a file edited in the last 10 minutes.",
+)
 @click.argument("command_and_args", nargs=-1, type=click.UNPROCESSED, required=True)
-def cmd_cmd(command_and_args: tuple[str, ...]) -> None:
-    """Run an arbitrary command after approval."""
+def cmd_cmd(confirm_recent_chmod: bool, command_and_args: tuple[str, ...]) -> None:
+    """Run an arbitrary command after approval.
+
+    A chmod of a recently created or edited file requires
+    --confirm-recent-chmod. Do not use chmod to prepare a script for ozm run;
+    ozm run executes a private executable snapshot automatically.
+    """
     if not command_and_args:
         raise click.ClickException("Nothing to run.")
 
@@ -204,6 +326,8 @@ def cmd_cmd(command_and_args: tuple[str, ...]) -> None:
         click.echo(f"ozm: blocked command '{command_name(command)}'", err=True)
         click.echo(f"ozm: {disallowed}", err=True)
         sys.exit(BLOCKED)
+
+    _require_recent_chmod_confirmation(args, confirmed=confirm_recent_chmod)
 
     try:
         blocked = is_command_blocked(command)
@@ -290,6 +414,10 @@ def cmd_cmd(command_and_args: tuple[str, ...]) -> None:
                 audit_log("blocked", "cmd", run_command)
                 click.echo(f"ozm: edited command blocked by pattern '{recheck}'", err=True)
                 sys.exit(BLOCKED)
+            _require_recent_chmod_confirmation(
+                run_args,
+                confirmed=confirm_recent_chmod,
+            )
         allow_pattern = approval.allow_pattern
         if approval.apply_globally and not allow_pattern:
             allow_pattern = run_command

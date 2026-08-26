@@ -360,7 +360,12 @@ def run_stdin_content(
 @click.option("--title", help="Stable title for --stdin approval cache entries.")
 @click.argument("items", nargs=-1, type=click.UNPROCESSED, required=False)
 def run_cmd(from_stdin: bool, title: str | None, items: tuple[str, ...]) -> None:
-    """Run a script after content review (hash-gated)."""
+    """Run a script after content review (hash-gated).
+
+    The source script needs a shebang, but it does not need an executable file
+    mode. Do not run chmod +x before this command. ozm executes the reviewed
+    content from a private, user-executable snapshot.
+    """
     parts, agent = extract_agent_metadata(list(items))
     if from_stdin:
         run_stdin_content(sys.stdin.read(), tuple(parts), agent, title=title)
