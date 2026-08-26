@@ -2,11 +2,15 @@ import AppKit
 import SwiftUI
 
 @MainActor
-final class ApprovalWindowManager: ObservableObject {
-    private var windows: [UUID: NSWindow] = [:]
+final class ApprovalWindowManager: NSObject, ObservableObject, ApprovalWindowPresenting, NSWindowDelegate {
+    private var window: NSWindow?
+    private var presentedID: UUID?
 
     func open(item: ApprovalQueue.PendingApproval, queue: ApprovalQueue) {
-        if let existing = windows[item.id] {
+        if let existing = window {
+            // Approval windows are strictly FIFO. A later request must wait
+            // until the currently presented request has been resolved.
+            guard presentedID == item.id else { return }
             existing.makeKeyAndOrderFront(nil)
             NSApp.activate()
             return
@@ -27,29 +31,35 @@ final class ApprovalWindowManager: ObservableObject {
         )
         window.title = "ozm — \(item.request.agent.name)"
         window.contentView = hostingView
+        window.delegate = self
         window.center()
         window.isReleasedWhenClosed = false
-        NSApp.setActivationPolicy(.regular)
         NSApp.activate()
         window.makeKeyAndOrderFront(nil)
         window.orderFrontRegardless()
 
-        windows[item.id] = window
+        self.window = window
+        presentedID = item.id
     }
 
     func close(id: UUID) {
-        windows[id]?.close()
-        windows.removeValue(forKey: id)
-        if windows.isEmpty {
-            NSApp.setActivationPolicy(.accessory)
-        }
+        guard presentedID == id else { return }
+        window?.close()
+        window = nil
+        presentedID = nil
     }
 
     func closeAll() {
-        for window in windows.values {
-            window.close()
-        }
-        windows.removeAll()
+        window?.close()
+        window = nil
+        presentedID = nil
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        guard let closingWindow = notification.object as? NSWindow,
+              closingWindow === window else { return }
+        window = nil
+        presentedID = nil
     }
 }
 

@@ -132,7 +132,10 @@ struct MenuBarFeedbackField: View {
             Image(systemName: "arrow.up.forward.square")
         }
         .buttonStyle(.borderless)
-        .help("Open in window")
+        .disabled(queue.pending.first?.id != item.id)
+        .help(queue.pending.first?.id == item.id
+            ? "Open in window"
+            : "Waiting for an earlier approval")
 
         Button("Deny") {
             queue.respond(to: item.id, with: ApprovalResponse(

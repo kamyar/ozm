@@ -24,6 +24,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     static var shared: AppState?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Keep the app in menu-bar-only mode for its entire lifetime. Toggling
+        // activation policy while MenuBarExtra is alive can make its window
+        // lose the status-item anchor and reappear at the bottom of the screen.
+        NSApp.setActivationPolicy(.accessory)
         AppDelegate.shared?.start()
     }
 
