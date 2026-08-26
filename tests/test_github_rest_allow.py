@@ -8,6 +8,7 @@ from unittest.mock import patch
 from click.testing import CliRunner
 
 from ozm import cmd as cmd_mod
+from ozm import gh as gh_mod
 from ozm import github_api
 from ozm.approve import ApprovalResult
 
@@ -133,7 +134,7 @@ class GitHubRESTReadAutoAllowTests(unittest.TestCase):
                  return_value=completed,
              ) as run_command, \
              patch.object(cmd_mod, "audit_log") as audit_log:
-            result = CliRunner().invoke(cmd_mod.cmd_cmd, [*META, *args])
+            result = CliRunner().invoke(gh_mod.gh_cmd, [*META, *args[1:]])
         return (
             result,
             is_blocked,

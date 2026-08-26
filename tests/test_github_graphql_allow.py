@@ -8,6 +8,7 @@ from unittest.mock import patch
 from click.testing import CliRunner
 
 from ozm import cmd as cmd_mod
+from ozm import gh as gh_mod
 from ozm.approve import ApprovalResult
 
 
@@ -65,7 +66,7 @@ class GitHubGraphQLReadAutoAllowTests(unittest.TestCase):
             patches[3] as request_approval, \
             patches[4] as run_command, \
             patches[5] as audit_log:
-            result = CliRunner().invoke(cmd_mod.cmd_cmd, [*META, *args])
+            result = CliRunner().invoke(gh_mod.gh_cmd, [*META, *args[1:]])
         return result, is_blocked, is_allowed, load_hashes, request_approval, run_command, audit_log
 
     def test_shorthand_github_graphql_query_runs_without_approval(self):
