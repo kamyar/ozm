@@ -28,6 +28,7 @@ from ozm.config import (
     project_key,
 )
 from ozm.github_api import read_only_reason as github_api_read_only_reason
+from ozm.paths import trusted_executable
 from ozm.run import load_hashes, save_hashes
 
 CMD_PREFIX = "cmd:"
@@ -46,7 +47,15 @@ def _scope_label(global_scope: bool) -> str:
 
 
 def _run_command(argv: list[str]) -> subprocess.CompletedProcess:
-    return subprocess.run(argv)
+    execution_argv = list(argv)
+    if execution_argv and execution_argv[0] == "gh":
+        gh = trusted_executable("gh")
+        if gh is None:
+            raise click.ClickException(
+                "trusted gh executable was not found in a system location"
+            )
+        execution_argv[0] = gh
+    return subprocess.run(execution_argv)
 
 
 def _is_env_assignment_token(token: str) -> bool:
@@ -249,24 +258,11 @@ def _find_script_in_args(args: tuple[str, ...]) -> tuple[str, str] | None:
     return None
 
 
-@click.command(
-    "cmd",
-    context_settings={"ignore_unknown_options": True, "allow_extra_args": True},
-)
-@click.option(
-    CONFIRM_RECENT_CHMOD_FLAG,
-    is_flag=True,
-    help="Confirm an intentional chmod of a file edited in the last 10 minutes.",
-)
-@click.argument("command_and_args", nargs=-1, type=click.UNPROCESSED, required=True)
-def cmd_cmd(confirm_recent_chmod: bool, command_and_args: tuple[str, ...]) -> None:
-    """Run an arbitrary command after approval.
-
-    A chmod of a recently created or edited file requires
-    --confirm-recent-chmod. Do not use chmod to prepare a script for ozm run;
-    ozm run executes a private executable snapshot automatically. Proven
-    read-only GitHub REST GET/HEAD requests and GraphQL queries run directly.
-    """
+def _cmd_impl(
+    confirm_recent_chmod: bool,
+    command_and_args: tuple[str, ...],
+) -> None:
+    """Apply command policy and execute one argv-style command."""
     if not command_and_args:
         raise click.ClickException("Nothing to run.")
 
@@ -504,3 +500,24 @@ def cmd_cmd(confirm_recent_chmod: bool, command_and_args: tuple[str, ...]) -> No
         err=True,
     )
     sys.exit(NO_DIALOG)
+
+
+@click.command(
+    "cmd",
+    context_settings={"ignore_unknown_options": True, "allow_extra_args": True},
+)
+@click.option(
+    CONFIRM_RECENT_CHMOD_FLAG,
+    is_flag=True,
+    help="Confirm an intentional chmod of a file edited in the last 10 minutes.",
+)
+@click.argument("command_and_args", nargs=-1, type=click.UNPROCESSED, required=True)
+def cmd_cmd(confirm_recent_chmod: bool, command_and_args: tuple[str, ...]) -> None:
+    """Run an arbitrary command after approval.
+
+    A chmod of a recently created or edited file requires
+    --confirm-recent-chmod. Do not use chmod to prepare a script for ozm run;
+    ozm run executes a private executable snapshot automatically. Proven
+    read-only GitHub REST GET/HEAD requests and GraphQL queries run directly.
+    """
+    _cmd_impl(confirm_recent_chmod, command_and_args)

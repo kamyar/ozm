@@ -15,7 +15,7 @@ MAX_AGENT_DESCRIPTION_LENGTH = 200
 
 MEMORY_REMINDER = (
     "ozm: Before retrying, write this requirement to your memory: every "
-    "ozm run/cmd/git/shell invocation must include agent metadata via "
+    "ozm run/cmd/gh/git/shell invocation must include agent metadata via "
     "--agent-name/--agent-description, --agent-json, or "
     "OZM_AGENT_NAME/OZM_AGENT_DESCRIPTION."
 )

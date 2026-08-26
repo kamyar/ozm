@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import os
 
 from ozm.github_graphql import read_only_reason as graphql_read_only_reason
 
@@ -36,6 +35,35 @@ _UNSAFE_HEADER_NAMES = frozenset({
     "x-http-method-override",
     "x-method-override",
 })
+_HIGH_LEVEL_READ_COMMANDS = frozenset({
+    ("auth", "status"),
+    ("issue", "list"),
+    ("issue", "status"),
+    ("issue", "view"),
+    ("label", "list"),
+    ("pr", "checks"),
+    ("pr", "diff"),
+    ("pr", "list"),
+    ("pr", "status"),
+    ("pr", "view"),
+    ("project", "item-list"),
+    ("project", "list"),
+    ("project", "view"),
+    ("release", "list"),
+    ("release", "view"),
+    ("repo", "list"),
+    ("repo", "view"),
+    ("run", "list"),
+    ("run", "view"),
+    ("run", "watch"),
+    ("search", "code"),
+    ("search", "commits"),
+    ("search", "issues"),
+    ("search", "prs"),
+    ("search", "repos"),
+    ("workflow", "list"),
+    ("workflow", "view"),
+})
 
 
 @dataclass(frozen=True)
@@ -45,7 +73,11 @@ class GitHubRESTRequest:
 
 
 def read_only_reason(args: list[str]) -> str | None:
-    """Return an allow reason for a proven read-only GitHub API request."""
+    """Return an allow reason for a proven read-only GitHub operation."""
+    high_level_reason = high_level_read_only_reason(args)
+    if high_level_reason:
+        return high_level_reason
+
     graphql_reason = graphql_read_only_reason(args)
     if graphql_reason:
         return graphql_reason
@@ -56,11 +88,20 @@ def read_only_reason(args: list[str]) -> str | None:
     return f"github rest {request.method}"
 
 
+def high_level_read_only_reason(args: list[str]) -> str | None:
+    if len(args) < 3 or args[0] != "gh":
+        return None
+    command = (args[1], args[2])
+    if command not in _HIGH_LEVEL_READ_COMMANDS:
+        return None
+    return f"github {command[0]} {command[1]}"
+
+
 def extract_rest_request(args: list[str]) -> GitHubRESTRequest | None:
     """Parse one unambiguous REST request from ``gh api`` argv."""
     if len(args) < 3:
         return None
-    if os.path.basename(args[0]) != "gh" or args[1] != "api":
+    if args[0] != "gh" or args[1] != "api":
         return None
 
     endpoint = None

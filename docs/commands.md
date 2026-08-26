@@ -141,6 +141,21 @@ flowchart TD
 
 ---
 
+## ozm gh
+
+Run GitHub CLI operations through the same policy engine as `ozm cmd`:
+
+```bash
+ozm gh --agent-name "Inspect PR" --agent-description "Read PR checks and review state." pr checks 123 --repo owner/repo
+ozm gh --agent-name "Read API" --agent-description "Read paginated review comments." api --paginate repos/owner/repo/pulls/123/comments --jq '.[] | {id,path,line}'
+```
+
+Ozm resolves the real `gh` executable from trusted system locations before execution. Known high-level reads, REST `GET` and `HEAD` requests, and proven GraphQL queries run directly. Writes and unknown operations continue through project/global blocklists, allowlists, the approval cache, and the approval dialog.
+
+To pass `--help` to the underlying GitHub CLI, use `ozm gh --agent-name "Read GitHub help" --agent-description "Show GitHub CLI help." -- --help`. A plain `ozm gh --help` shows proxy help.
+
+---
+
 ## ozm git
 
 Git pass-through with rule enforcement on commit and push. All other git subcommands pass through unmodified.

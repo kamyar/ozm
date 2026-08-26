@@ -107,7 +107,7 @@ ozm cmd --agent-name "Check API" --agent-description "Call the service health en
 
 `ozm cmd` executes argv directly rather than through a shell. It detects script execution and redirects the agent to `ozm run`, refuses `ozm cmd git ...` in favor of `ozm git`, and hard-blocks cases that are unsafe to blanket approve, including `sed`, `gsed`, and `rg --pre`. When `chmod` targets a file modified in the last 10 minutes, ozm requires `--confirm-recent-chmod` before normal command policy checks continue.
 
-Read-only GitHub API requests are recognized semantically. Unambiguous REST `GET` and `HEAD` requests can run without an approval dialog. REST writes, ambiguous methods, file-backed input, unsafe method-override headers, and absolute non-GitHub endpoints still require review. GraphQL requests such as `gh api graphql -f query=...` are auto-allowed only when the selected operation is definitely a query. Mutations, file-backed queries, malformed documents, or ambiguous multi-operation requests still require review.
+Use `ozm gh` for GitHub operations. It applies the normal blocklist, allowlist, cache, and approval flow, then resolves `gh` from trusted system locations. Known high-level reads and unambiguous REST `GET` and `HEAD` requests can run without an approval dialog. REST writes, ambiguous methods, file-backed input, unsafe method-override headers, and absolute non-GitHub endpoints still require review. GraphQL requests such as `gh api graphql -f query=...` are auto-allowed only when the selected operation is definitely a query. Mutations, file-backed queries, malformed documents, or ambiguous multi-operation requests still require review.
 
 ### Git: `ozm git`
 
@@ -138,6 +138,7 @@ Commands:
   cmd      Run an arbitrary command after approval.
   config   Show the path to this project's user-owned config.
   doctor   Check ozm installation health.
+  gh       Operation-aware GitHub CLI proxy.
   git      Git pass-through.
   install  Install ozm hooks system-wide.
   log      Show recent audit log entries.
