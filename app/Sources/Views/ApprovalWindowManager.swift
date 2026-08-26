@@ -38,6 +38,9 @@ final class ApprovalWindowManager: NSObject, ObservableObject, ApprovalWindowPre
         window.delegate = self
         center(window, on: focusedScreen)
         window.isReleasedWhenClosed = false
+        // Accessory apps do not appear in Command-Tab. Use the regular policy
+        // while an approval is visible so the user can always recover it.
+        NSApp.setActivationPolicy(.regular)
         NSApp.activate()
         window.makeKeyAndOrderFront(nil)
         window.orderFrontRegardless()
@@ -62,12 +65,14 @@ final class ApprovalWindowManager: NSObject, ObservableObject, ApprovalWindowPre
         window?.close()
         window = nil
         presentedID = nil
+        restoreAccessoryPolicyIfIdle()
     }
 
     func closeAll() {
         window?.close()
         window = nil
         presentedID = nil
+        restoreAccessoryPolicyIfIdle()
     }
 
     func windowWillClose(_ notification: Notification) {
@@ -75,6 +80,16 @@ final class ApprovalWindowManager: NSObject, ObservableObject, ApprovalWindowPre
               closingWindow === window else { return }
         window = nil
         presentedID = nil
+        restoreAccessoryPolicyIfIdle()
+    }
+
+    private func restoreAccessoryPolicyIfIdle() {
+        // Defer this check. The queue can open the next FIFO item immediately
+        // after closing the current item. Keep the regular policy in that case.
+        Task { @MainActor [weak self] in
+            guard self?.window == nil else { return }
+            NSApp.setActivationPolicy(.accessory)
+        }
     }
 }
 
