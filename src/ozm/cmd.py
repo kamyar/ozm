@@ -258,9 +258,33 @@ def _find_script_in_args(args: tuple[str, ...]) -> tuple[str, str] | None:
     return None
 
 
+def _reject_gh_via_cmd(args: list[str], agent) -> None:
+    if not args or os.path.basename(args[0]) != "gh":
+        return
+    command = shlex.join(args)
+    suggestion = shlex.join([
+        "ozm",
+        "gh",
+        "--agent-name",
+        agent.name,
+        "--agent-description",
+        agent.description,
+        *args[1:],
+    ])
+    audit_log("blocked", "cmd", command, "use the native ozm gh command")
+    click.echo(
+        "ozm: direct GitHub CLI commands must use 'ozm gh', not 'ozm cmd gh'.",
+        err=True,
+    )
+    click.echo(f"ozm: re-run as: {suggestion}", err=True)
+    raise click_error("use the native 'ozm gh' command", BLOCKED)
+
+
 def _cmd_impl(
     confirm_recent_chmod: bool,
     command_and_args: tuple[str, ...],
+    *,
+    github_proxy: bool = False,
 ) -> None:
     """Apply command policy and execute one argv-style command."""
     if not command_and_args:
@@ -281,6 +305,9 @@ def _cmd_impl(
             reason = a.split("=", 1)[1]
             args.pop(i)
             break
+
+    if not github_proxy:
+        _reject_gh_via_cmd(args, agent)
 
     inline = _detect_inline_code(tuple(args))
     if inline:
@@ -399,6 +426,15 @@ def _cmd_impl(
         if run_command != command:
             run_args = _edited_argv(run_command)
             run_command = shlex.join(run_args)
+        if github_proxy:
+            if not run_args or run_args[0] != "gh":
+                audit_log("blocked", "cmd", run_command, "ozm gh edit removed gh")
+                raise click_error(
+                    "an edited 'ozm gh' command must remain a GitHub CLI command",
+                    BLOCKED,
+                )
+        else:
+            _reject_gh_via_cmd(run_args, agent)
         run_disallowed = disallowed_command_reason(run_command)
         if run_disallowed:
             audit_log("blocked", "cmd", run_command)
@@ -517,7 +553,7 @@ def cmd_cmd(confirm_recent_chmod: bool, command_and_args: tuple[str, ...]) -> No
 
     A chmod of a recently created or edited file requires
     --confirm-recent-chmod. Do not use chmod to prepare a script for ozm run;
-    ozm run executes a private executable snapshot automatically. Proven
-    read-only GitHub REST GET/HEAD requests and GraphQL queries run directly.
+    ozm run executes a private executable snapshot automatically. GitHub CLI
+    commands are rejected with an equivalent ozm gh suggestion.
     """
     _cmd_impl(confirm_recent_chmod, command_and_args)

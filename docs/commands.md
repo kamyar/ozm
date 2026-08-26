@@ -90,6 +90,8 @@ $ ozm cmd --agent-name "Run script" --agent-description "Try to execute a Python
 ozm: use 'ozm run --agent-name "Run script" --agent-description "Try to execute a Python script." myscript.py' instead — make sure the script has a shebang (#!/usr/bin/env python3)
 ```
 
+**GitHub command redirect:** Direct `gh` commands sent through `ozm cmd` are rejected before policy, cache, or approval checks. Ozm prints the equivalent `ozm gh` invocation with the original agent metadata and GitHub arguments. This includes high-level commands and raw API operations such as pull-request review replies.
+
 **Editable commands:** The macOS approval dialog lets you edit the command before running it. You can also enter a rule pattern (e.g. `curl https://api.example.com/*`). If you click Allow, the pattern is saved as an allowlist rule. If you click Deny, the pattern is saved as a blocklist rule. Check **Apply globally** to save the rule in `~/.ozm/config.yaml`; otherwise it is saved to the trusted project config. If **Apply globally** is checked and the rule field is blank, ozm saves the exact command as the global rule.
 
 **Agent metadata:** `--agent-name` is the short work name shown in the dialog. `--agent-description` must be exactly one line describing what the agent is trying to do. Missing, empty, multiline, or overlong metadata is rejected before execution, with an instruction for the agent to write the requirement to memory before retrying.
@@ -154,7 +156,7 @@ ozm gh --agent-name "Inspect PR" --agent-description "Read PR checks and review 
 ozm gh --agent-name "Read API" --agent-description "Read paginated review comments." api --paginate repos/owner/repo/pulls/123/comments --jq '.[] | {id,path,line}'
 ```
 
-Ozm resolves the real `gh` executable from trusted system locations before execution. Known high-level reads, REST `GET` and `HEAD` requests, and proven GraphQL queries run directly. Writes and unknown operations continue through project/global blocklists, allowlists, the approval cache, and the approval dialog.
+Use `ozm gh` instead of direct `gh` or `ozm cmd gh ...` commands. Ozm resolves the real `gh` executable from trusted system locations before execution. Known high-level reads, REST `GET` and `HEAD` requests, and proven GraphQL queries run directly. Writes and unknown operations continue through project/global blocklists, allowlists, the approval cache, and the approval dialog.
 
 To pass `--help` to the underlying GitHub CLI, use `ozm gh --agent-name "Read GitHub help" --agent-description "Show GitHub CLI help." -- --help`. A plain `ozm gh --help` shows proxy help.
 

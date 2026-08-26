@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import shlex
 import subprocess
 import unittest
 from unittest.mock import patch
@@ -15,6 +16,82 @@ META = [
     "--agent-name", "GitHub proxy test",
     "--agent-description", "Exercise the operation-aware GitHub proxy.",
 ]
+
+
+class GitHubCommandNudgeTests(unittest.TestCase):
+    def test_cmd_rejects_review_reply_and_suggests_native_proxy(self):
+        args = [
+            "gh",
+            "api",
+            "-X",
+            "POST",
+            "repos/doordash/pedregal/pulls/458415/comments/3867433262/replies",
+            "-f",
+            "body=thanks",
+        ]
+        with patch.object(cmd_mod, "is_command_blocked") as is_blocked, \
+             patch.object(cmd_mod, "is_command_allowed") as is_allowed, \
+             patch.object(cmd_mod, "load_hashes") as load_hashes, \
+             patch.object(cmd_mod, "request_cmd_approval") as request_approval, \
+             patch.object(cmd_mod, "_run_command") as run_command, \
+             patch.object(cmd_mod, "audit_log") as audit_log:
+            result = CliRunner().invoke(cmd_mod.cmd_cmd, [*META, *args])
+
+        self.assertEqual(result.exit_code, cmd_mod.BLOCKED)
+        self.assertIn("must use 'ozm gh'", result.output)
+        self.assertIn(
+            "api -X POST "
+            "repos/doordash/pedregal/pulls/458415/comments/3867433262/replies",
+            result.output,
+        )
+        is_blocked.assert_not_called()
+        is_allowed.assert_not_called()
+        load_hashes.assert_not_called()
+        request_approval.assert_not_called()
+        run_command.assert_not_called()
+        audit_log.assert_called_once_with(
+            "blocked",
+            "cmd",
+            shlex.join(args),
+            "use the native ozm gh command",
+        )
+
+    def test_cmd_rejects_absolute_gh_path(self):
+        with patch.object(cmd_mod, "audit_log"):
+            result = CliRunner().invoke(
+                cmd_mod.cmd_cmd,
+                [*META, "/opt/homebrew/bin/gh", "pr", "view", "123"],
+            )
+
+        self.assertEqual(result.exit_code, cmd_mod.BLOCKED)
+        self.assertIn("ozm gh", result.output)
+        self.assertIn("pr view 123", result.output)
+        self.assertNotIn("/opt/homebrew/bin/gh", result.output)
+
+    def test_dialog_edit_to_gh_is_rejected_with_native_proxy_nudge(self):
+        with patch.object(cmd_mod, "is_command_blocked", return_value=None), \
+             patch.object(cmd_mod, "is_command_allowed", return_value=False), \
+             patch.object(cmd_mod, "load_hashes", return_value={}), \
+             patch.object(
+                 cmd_mod,
+                 "request_cmd_approval",
+                 return_value=ApprovalResult(
+                     approved=True,
+                     command="gh pr comment 123 --body hello",
+                 ),
+             ), \
+             patch.object(cmd_mod, "save_hashes") as save_hashes, \
+             patch.object(cmd_mod, "_run_command") as run_command, \
+             patch.object(cmd_mod, "audit_log"):
+            result = CliRunner().invoke(
+                cmd_mod.cmd_cmd,
+                [*META, "unknown-tool", "hello"],
+            )
+
+        self.assertEqual(result.exit_code, cmd_mod.BLOCKED)
+        self.assertIn("must use 'ozm gh'", result.output)
+        save_hashes.assert_not_called()
+        run_command.assert_not_called()
 
 
 class GitHubProxyTests(unittest.TestCase):
@@ -66,6 +143,31 @@ class GitHubProxyTests(unittest.TestCase):
         request_approval.assert_called_once()
         run_command.assert_not_called()
         self.assertIn("denied cmd", result.output)
+
+    def test_proxy_rejects_dialog_edit_that_removes_gh(self):
+        with patch.object(cmd_mod, "is_command_blocked", return_value=None), \
+             patch.object(cmd_mod, "is_command_allowed", return_value=False), \
+             patch.object(cmd_mod, "load_hashes", return_value={}), \
+             patch.object(
+                 cmd_mod,
+                 "request_cmd_approval",
+                 return_value=ApprovalResult(
+                     approved=True,
+                     command="echo not-github",
+                 ),
+             ), \
+             patch.object(cmd_mod, "save_hashes") as save_hashes, \
+             patch.object(cmd_mod, "_run_command") as run_command, \
+             patch.object(cmd_mod, "audit_log"):
+            result = CliRunner().invoke(
+                gh_mod.gh_cmd,
+                [*META, "pr", "comment", "123", "--body", "hello"],
+            )
+
+        self.assertEqual(result.exit_code, cmd_mod.BLOCKED)
+        self.assertIn("must remain a GitHub CLI command", result.output)
+        save_hashes.assert_not_called()
+        run_command.assert_not_called()
 
     def test_proxy_requires_agent_metadata(self):
         result = CliRunner().invoke(gh_mod.gh_cmd, ["api", "rate_limit"])

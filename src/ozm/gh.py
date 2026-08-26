@@ -19,4 +19,4 @@ def gh_cmd(items: tuple[str, ...]) -> None:
     approval, blocklist, allowlist, and cache flow. The real gh executable is
     resolved from trusted system locations before execution.
     """
-    _cmd_impl(False, ("gh", *items))
+    _cmd_impl(False, ("gh", *items), github_proxy=True)
