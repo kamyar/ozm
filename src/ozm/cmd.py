@@ -27,7 +27,7 @@ from ozm.config import (
     is_command_blocked,
     project_key,
 )
-from ozm.github_graphql import read_only_reason as github_graphql_read_only_reason
+from ozm.github_api import read_only_reason as github_api_read_only_reason
 from ozm.run import load_hashes, save_hashes
 
 CMD_PREFIX = "cmd:"
@@ -264,7 +264,8 @@ def cmd_cmd(confirm_recent_chmod: bool, command_and_args: tuple[str, ...]) -> No
 
     A chmod of a recently created or edited file requires
     --confirm-recent-chmod. Do not use chmod to prepare a script for ozm run;
-    ozm run executes a private executable snapshot automatically.
+    ozm run executes a private executable snapshot automatically. Proven
+    read-only GitHub REST GET/HEAD requests and GraphQL queries run directly.
     """
     if not command_and_args:
         raise click.ClickException("Nothing to run.")
@@ -356,7 +357,7 @@ def cmd_cmd(confirm_recent_chmod: bool, command_and_args: tuple[str, ...]) -> No
 
     semantic_reason = _safe_read_only_reason(command)
     if not semantic_reason:
-        semantic_reason = github_graphql_read_only_reason(args)
+        semantic_reason = github_api_read_only_reason(args)
     if semantic_reason:
         audit_log("semantic", "cmd", command, semantic_reason)
         click.echo(f"ozm: allowed ({semantic_reason})", err=True)
