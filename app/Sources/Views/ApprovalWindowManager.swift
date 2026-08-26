@@ -16,6 +16,10 @@ final class ApprovalWindowManager: NSObject, ObservableObject, ApprovalWindowPre
             return
         }
 
+        // Capture the focused screen before activating ozm. After activation,
+        // NSScreen.main can refer to an ozm window on a different display.
+        let focusedScreen = NSScreen.main
+
         let view = ApprovalWindowContent(item: item, queue: queue, onDismiss: { [weak self] in
             self?.close(id: item.id)
         })
@@ -32,7 +36,7 @@ final class ApprovalWindowManager: NSObject, ObservableObject, ApprovalWindowPre
         window.title = "ozm — \(item.request.agent.name)"
         window.contentView = hostingView
         window.delegate = self
-        window.center()
+        center(window, on: focusedScreen)
         window.isReleasedWhenClosed = false
         NSApp.activate()
         window.makeKeyAndOrderFront(nil)
@@ -40,6 +44,17 @@ final class ApprovalWindowManager: NSObject, ObservableObject, ApprovalWindowPre
 
         self.window = window
         presentedID = item.id
+    }
+
+    private func center(_ window: NSWindow, on screen: NSScreen?) {
+        guard let visibleFrame = screen?.visibleFrame else {
+            window.center()
+            return
+        }
+        window.setFrameOrigin(NSPoint(
+            x: visibleFrame.midX - window.frame.width / 2,
+            y: visibleFrame.midY - window.frame.height / 2
+        ))
     }
 
     func close(id: UUID) {
