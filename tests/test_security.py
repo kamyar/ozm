@@ -237,10 +237,9 @@ class TestRecentChmodConfirmation(unittest.TestCase):
         )
         self.assertEqual(run_help.exit_code, 0)
         self.assertIn("chmod +x", run_help.output)
-        self.assertIn(
-            "user-executable snapshot",
-            " ".join(run_help.output.split()),
-        )
+        normalized_run_help = " ".join(run_help.output.split())
+        self.assertIn("user-executable snapshot", normalized_run_help)
+        self.assertIn("only one executable line", normalized_run_help)
 
 
 class TestSedAllowlistRejection(unittest.TestCase):
@@ -750,8 +749,8 @@ class TestRunToctou(unittest.TestCase):
 
     def test_content_swapped_during_approval_does_not_execute(self):
         runner = CliRunner()
-        original = "#!/usr/bin/env sh\necho original\n"
-        swapped = "#!/usr/bin/env sh\necho SWAPPED\n"
+        original = "#!/usr/bin/env sh\necho original\n:\n"
+        swapped = "#!/usr/bin/env sh\necho SWAPPED\n:\n"
 
         with runner.isolated_filesystem():
             os.mkdir(".git")
@@ -787,7 +786,7 @@ class TestRunToctou(unittest.TestCase):
     def test_approval_dialog_shows_hashed_content_not_disk_content(self):
         """request_approval must receive the in-memory content that will run."""
         runner = CliRunner()
-        original = "#!/usr/bin/env sh\necho original\n"
+        original = "#!/usr/bin/env sh\necho original\n:\n"
 
         with runner.isolated_filesystem():
             os.mkdir(".git")

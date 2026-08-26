@@ -173,7 +173,7 @@ class StdinShellTests(unittest.TestCase):
             result = CliRunner().invoke(
                 run_mod.run_cmd,
                 ["--stdin", "--title", "pi-test", *META],
-                input="#!/usr/bin/env sh\necho hi\n",
+                input="#!/usr/bin/env sh\necho hi\nprintf done\n",
             )
 
         self.assertEqual(result.exit_code, 0, result.output)
@@ -182,6 +182,23 @@ class StdinShellTests(unittest.TestCase):
         argv = subprocess_run.call_args.args[0]
         self.assertEqual(len(argv), 1)
         self.assertFalse(os.path.exists(argv[0]))
+
+    def test_bash_allows_one_direct_shell_command(self):
+        with patch.object(run_mod, "load_hashes", return_value={}), \
+             patch.object(
+                 run_mod,
+                 "request_approval",
+                 return_value=ApprovalResult(approved=False),
+             ) as request_approval, \
+             patch.object(run_mod, "audit_log"):
+            result = CliRunner().invoke(
+                shell_mod.shell_cmd,
+                ["--command", "rg -n TODO src", "--title", "pi-shell", *META],
+            )
+
+        self.assertEqual(result.exit_code, run_mod.DENIED)
+        request_approval.assert_called_once()
+        self.assertNotIn("one-command scripts are not allowed", result.output)
 
     def test_bash_command_is_converted_to_reviewed_stdin_script(self):
         with patch.object(shell_mod, "run_stdin_content") as run_stdin_content:
