@@ -5,6 +5,7 @@ import difflib
 import hashlib
 import json
 import os
+import shlex
 import stat
 import subprocess
 import sys
@@ -223,6 +224,36 @@ def _executable_lines(content: str) -> list[str]:
     ]
 
 
+def _all_ozm_invocations(lines: list[str]) -> bool:
+    """Return true when every shell command segment invokes ozm directly."""
+    if not lines:
+        return False
+    return all(_line_contains_only_ozm(line) for line in lines)
+
+
+def _line_contains_only_ozm(line: str) -> bool:
+    lexer = shlex.shlex(line, posix=True, punctuation_chars=";&|")
+    lexer.whitespace_split = True
+    try:
+        tokens = list(lexer)
+    except ValueError:
+        return False
+    expect_command = True
+    saw_command = False
+    for token in tokens:
+        if token and all(char in ";&|" for char in token):
+            if expect_command:
+                return False
+            expect_command = True
+            continue
+        if expect_command:
+            if token != "ozm":
+                return False
+            saw_command = True
+            expect_command = False
+    return saw_command and not expect_command
+
+
 def _display_key_target(root: str, target: str) -> str:
     if not os.path.isabs(target):
         return target
@@ -257,9 +288,20 @@ def _run_reviewed_script(
             content = f.read()
     current_hash = compute_content_hash(content)
     display_content = content.decode("utf-8", errors="replace")
+    executable_lines = _executable_lines(display_content)
+    if _all_ozm_invocations(executable_lines):
+        reason = "run ozm commands directly instead of through a reviewed file"
+        audit_log("blocked", "run", audit_target, reason)
+        _cleanup(cleanup_path)
+        raise click_error(
+            "scripts that only invoke ozm are not allowed. Run each ozm "
+            "command directly, one at a time, instead of opening a file for "
+            "review. Direct commands can use normal automatic approvals.",
+            BLOCKED,
+        )
     if (
         not key_target.startswith(SHELL_PREFIX)
-        and len(_executable_lines(display_content)) == 1
+        and len(executable_lines) == 1
     ):
         reason = "one-command scripts must run as direct ozm commands"
         audit_log("blocked", "run", audit_target, reason)
@@ -391,7 +433,8 @@ def run_cmd(from_stdin: bool, title: str | None, items: tuple[str, ...]) -> None
     The source script needs a shebang, but it does not need an executable file
     mode. Do not run chmod +x before this command. ozm executes the reviewed
     content from a private, user-executable snapshot. Scripts with only one
-    executable line are rejected; run that command directly through ozm.
+    executable line are rejected. Content made only of ozm command segments is
+    also rejected; run each ozm command directly and separately.
     """
     parts, agent = extract_agent_metadata(list(items))
     if from_stdin:

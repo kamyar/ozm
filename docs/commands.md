@@ -37,7 +37,7 @@ print("hello")
 echo "hello"
 ```
 
-**One-command scripts are rejected.** The shebang, blank lines, and comment-only lines do not count as executable lines. If only one executable line remains, Ozm stops before cache and approval checks. Run the command directly with `ozm cmd`, `ozm gh`, or `ozm git`. Use `ozm bash --command` only when the command requires shell syntax. Use `ozm run` for scripts that contain real multi-step logic.
+**Direct-command wrapper scripts are rejected.** The shebang, blank lines, and comment-only lines do not count as executable lines. If only one executable line remains, Ozm stops before cache and approval checks. Ozm also stops when every command segment invokes `ozm`. This applies to disk files, `ozm run --stdin`, and generated in-memory `shell:` files for input such as `ozm status && ozm tips`. Run each Ozm command directly and one at a time so normal automatic approvals can apply. Use `ozm run` only for scripts that contain real multi-step logic.
 
 ### Flow
 
@@ -47,7 +47,9 @@ flowchart TD
     B -->|No| M[Reject with memory reminder]
     B -->|Yes| C{File exists?}
     C -->|No| E[Error: not found]
-    C -->|Yes| O{Only one executable line?}
+    C -->|Yes| Z{Only ozm command segments?}
+    Z -->|Yes| Q[Reject: run each ozm command directly]
+    Z -->|No| O{Only one executable line?}
     O -->|Yes| P[Reject: use a direct ozm command]
     O -->|No| D{Hash matches stored?}
     D -->|Yes| X[Execute immediately]
