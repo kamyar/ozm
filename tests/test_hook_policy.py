@@ -49,11 +49,16 @@ class HookPolicyTests(unittest.TestCase):
                 )
 
     def test_ozm_commands_without_agent_metadata_are_denied(self):
-        for command in ("ozm run script.sh", "ozm cmd echo hello", "ozm git status"):
+        for command in (
+            "ozm run script.sh",
+            "ozm cmd echo hello",
+            "ozm gh pr view 1",
+            "ozm git status",
+        ):
             with self.subTest(command=command):
                 self.assert_denied(
                     command,
-                    "ozm run/cmd/git requires --agent-name and --agent-description",
+                    "ozm run/cmd/gh/git requires --agent-name and --agent-description",
                 )
 
     def test_ozm_git_with_metadata_is_allowed(self):

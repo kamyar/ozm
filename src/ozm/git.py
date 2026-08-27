@@ -13,6 +13,7 @@ from ozm.approve import request_override
 from ozm.audit import log as audit_log
 from ozm.config import commit_config
 from ozm.exit_codes import BLOCKED, DENIED, NO_DIALOG
+from ozm.output_filter import current_grep_terms, run_with_output_filter
 from ozm.paths import trusted_executable
 
 MAX_SUBJECT_LENGTH = 72
@@ -80,6 +81,12 @@ def _git_binary() -> str:
             "git not found in trusted system paths (/usr/bin, /opt/homebrew/bin, ...)"
         )
     return git
+
+
+def _run_git(argv: list[str]) -> subprocess.CompletedProcess:
+    if current_grep_terms():
+        return run_with_output_filter(argv)
+    return subprocess.run(argv)
 
 
 def get_current_branch(global_args: list[str] | None = None) -> str | None:
@@ -334,8 +341,8 @@ def git_cmd(args: tuple[str, ...]) -> None:
     """Git pass-through. Enforces rules on commit and push."""
     args_list, agent = extract_agent_metadata(list(args))
     if not args_list:
-        subprocess.run([_git_binary()])
-        return
+        result = _run_git([_git_binary()])
+        sys.exit(result.returncode)
 
     global_args, command_args = _split_global_options(args_list)
     global_violation = _check_global_options(global_args)
@@ -343,7 +350,7 @@ def git_cmd(args: tuple[str, ...]) -> None:
         _handle_violation(global_violation, _git_command(args_list), None, agent)
 
     if not command_args:
-        result = subprocess.run([_git_binary(), *global_args])
+        result = _run_git([_git_binary(), *global_args])
         sys.exit(result.returncode)
 
     subcmd = command_args[0]
@@ -372,5 +379,5 @@ def git_cmd(args: tuple[str, ...]) -> None:
             full_cmd = _git_command([*global_args, subcmd, *rest])
             _handle_violation(violation, full_cmd, reason, agent)
 
-    result = subprocess.run([_git_binary(), *global_args, subcmd, *rest])
+    result = _run_git([_git_binary(), *global_args, subcmd, *rest])
     sys.exit(result.returncode)

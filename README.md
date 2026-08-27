@@ -96,6 +96,16 @@ ozm run --agent-name "Run tests" --agent-description "Execute the reviewed test 
 
 Scripts must have a shebang, but the source file does not need an executable file mode. Do not run `chmod +x` before `ozm run`; ozm executes the reviewed content from a private, user-executable snapshot. Ozm rejects scripts with only one executable line before cache or approval checks. It also rejects disk, stdin, and generated in-memory shell files when every command segment is an `ozm` invocation. Run those Ozm commands directly and one at a time so normal automatic approvals can apply. Run other single commands directly with `ozm cmd`, `ozm gh`, or `ozm git`; use `ozm bash --command` when shell syntax is required. The first approval stores the script's SHA-256 hash under the current project. Unchanged scripts run without prompting; changed scripts show a diff against the last approved snapshot before they can run again.
 
+### Shell-free output filtering: `ozm --grep`
+
+Put repeatable `--grep TERM` options before the command family to show only stdout lines that contain any selected literal term:
+
+```bash
+ozm --grep "projection" --grep "coverage" git --agent-name "Inspect main" --agent-description "Find projection and coverage code on main." show origin/main:path/to/config.go
+```
+
+The filter works with `ozm cmd`, `ozm gh`, `ozm git`, and `ozm run`. It streams matching stdout lines, leaves stderr unchanged, and returns exit code 1 when the child succeeds but no line matches. Use it instead of creating a shell pipeline with `grep` or `rg` only to filter output.
+
 ### Commands: `ozm cmd`
 
 Use `ozm cmd` for non-script commands.

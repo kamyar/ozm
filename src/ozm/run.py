@@ -17,6 +17,7 @@ from ozm.approve import request_approval
 from ozm.audit import log as audit_log
 from ozm.exit_codes import BLOCKED, CONFIG_ERROR, DENIED, NO_DIALOG, click_error
 from ozm.config import project_key
+from ozm.output_filter import current_grep_terms, run_with_output_filter
 from ozm.storage import (
     ensure_private_dir,
     load_yaml_no_follow,
@@ -206,7 +207,10 @@ def _execute_script(abs_path: str, args: tuple[str, ...], content: bytes) -> Non
             f.write(content)
         os.chmod(snapshot, stat.S_IRUSR | stat.S_IXUSR)
         env = {**os.environ, "OZM_SCRIPT_PATH": abs_path}
-        result = subprocess.run([snapshot, *args], env=env)
+        if current_grep_terms():
+            result = run_with_output_filter([snapshot, *args], env=env)
+        else:
+            result = subprocess.run([snapshot, *args], env=env)
     finally:
         _cleanup(snapshot)
     sys.exit(result.returncode)
