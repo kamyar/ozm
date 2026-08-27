@@ -28,6 +28,11 @@ from ozm.config import (
     project_key,
 )
 from ozm.github_api import read_only_reason as github_api_read_only_reason
+from ozm.github_operations import (
+    match_raw_review_reply,
+    parse_review_reply,
+    review_reply_execution_args,
+)
 from ozm.paths import trusted_executable
 from ozm.run import load_hashes, save_hashes
 
@@ -48,6 +53,9 @@ def _scope_label(global_scope: bool) -> str:
 
 def _run_command(argv: list[str]) -> subprocess.CompletedProcess:
     execution_argv = list(argv)
+    typed_github_argv = review_reply_execution_args(execution_argv)
+    if typed_github_argv is not None:
+        execution_argv = typed_github_argv
     if execution_argv and execution_argv[0] == "gh":
         gh = trusted_executable("gh")
         if gh is None:
@@ -258,19 +266,61 @@ def _find_script_in_args(args: tuple[str, ...]) -> tuple[str, str] | None:
     return None
 
 
-def _reject_gh_via_cmd(args: list[str], agent) -> None:
-    if not args or os.path.basename(args[0]) != "gh":
-        return
-    command = shlex.join(args)
-    suggestion = shlex.join([
+def _native_gh_suggestion(agent, operation_args: list[str]) -> str:
+    return shlex.join([
         "ozm",
         "gh",
         "--agent-name",
         agent.name,
         "--agent-description",
         agent.description,
-        *args[1:],
+        *operation_args,
     ])
+
+
+def _reject_supported_raw_github_write(
+    args: list[str],
+    agent,
+    *,
+    audit_kind: str,
+) -> None:
+    if not args or os.path.basename(args[0]) != "gh":
+        return
+    normalized_args = ["gh", *args[1:]]
+    operation = match_raw_review_reply(normalized_args)
+    if operation is None:
+        return
+
+    command = shlex.join(normalized_args)
+    suggestion = _native_gh_suggestion(agent, operation.typed_args())
+    audit_log(
+        "blocked",
+        audit_kind,
+        command,
+        "raw review-reply POST must use pr review-reply",
+    )
+    click.echo(
+        "ozm: raw review-reply POST is not allowed because ozm supports "
+        "'pr review-reply'.",
+        err=True,
+    )
+    click.echo(f"ozm: re-run as: {suggestion}", err=True)
+    raise click_error("use the typed 'ozm gh pr review-reply' operation", BLOCKED)
+
+
+def _validate_github_proxy_args(args: list[str], agent) -> None:
+    _reject_supported_raw_github_write(args, agent, audit_kind="gh")
+    if args and args[0] == "gh":
+        parse_review_reply(args[1:])
+
+
+def _reject_gh_via_cmd(args: list[str], agent) -> None:
+    if not args or os.path.basename(args[0]) != "gh":
+        return
+    normalized_args = ["gh", *args[1:]]
+    _reject_supported_raw_github_write(normalized_args, agent, audit_kind="cmd")
+    command = shlex.join(normalized_args)
+    suggestion = _native_gh_suggestion(agent, normalized_args[1:])
     audit_log("blocked", "cmd", command, "use the native ozm gh command")
     click.echo(
         "ozm: direct GitHub CLI commands must use 'ozm gh', not 'ozm cmd gh'.",
@@ -306,7 +356,9 @@ def _cmd_impl(
             args.pop(i)
             break
 
-    if not github_proxy:
+    if github_proxy:
+        _validate_github_proxy_args(args, agent)
+    else:
         _reject_gh_via_cmd(args, agent)
 
     inline = _detect_inline_code(tuple(args))
@@ -344,9 +396,10 @@ def _cmd_impl(
         sys.exit(BLOCKED)
 
     command = shlex.join(args)
+    audit_kind = "gh" if github_proxy else "cmd"
     disallowed = disallowed_command_reason(command)
     if disallowed:
-        audit_log("blocked", "cmd", command)
+        audit_log("blocked", audit_kind, command)
         click.echo(f"ozm: blocked command '{command_name(command)}'", err=True)
         click.echo(f"ozm: {disallowed}", err=True)
         sys.exit(BLOCKED)
@@ -356,25 +409,25 @@ def _cmd_impl(
     try:
         blocked = is_command_blocked(command)
     except (OSError, RuntimeError) as exc:
-        audit_log("error", "cmd", command, str(exc))
+        audit_log("error", audit_kind, command, str(exc))
         raise click_error(
             f"config error: {exc}. The command was NOT executed.",
             CONFIG_ERROR,
         ) from exc
     if blocked:
         if not reason:
-            audit_log("blocked", "cmd", command)
+            audit_log("blocked", audit_kind, command)
             click.echo(f"ozm: blocked by pattern '{blocked}' in config", err=True)
             click.echo("ozm: use --reason \"justification\" to request a one-time override", err=True)
             sys.exit(BLOCKED)
         approval = request_override(command, f"blocked by pattern '{blocked}'", reason, agent)
         if approval.approved is True:
-            audit_log("override", "cmd", command, approval.feedback)
+            audit_log("override", audit_kind, command, approval.feedback)
             click.echo("ozm: override granted (one-time)", err=True)
             result = _run_command(args)
             sys.exit(result.returncode)
         else:
-            audit_log("denied", "cmd", command, approval.feedback)
+            audit_log("denied", audit_kind, command, approval.feedback)
             click.echo("ozm: override denied", err=True)
             sys.exit(DENIED)
 
@@ -382,7 +435,7 @@ def _cmd_impl(
     if not semantic_reason:
         semantic_reason = github_api_read_only_reason(args)
     if semantic_reason:
-        audit_log("semantic", "cmd", command, semantic_reason)
+        audit_log("semantic", audit_kind, command, semantic_reason)
         click.echo(f"ozm: allowed ({semantic_reason})", err=True)
         result = _run_command(args)
         sys.exit(result.returncode)
@@ -390,13 +443,13 @@ def _cmd_impl(
     try:
         allowed = is_command_allowed(command)
     except (OSError, RuntimeError) as exc:
-        audit_log("error", "cmd", command, str(exc))
+        audit_log("error", audit_kind, command, str(exc))
         raise click_error(
             f"config error: {exc}. The command was NOT executed.",
             CONFIG_ERROR,
         ) from exc
     if allowed:
-        audit_log("config", "cmd", command)
+        audit_log("config", audit_kind, command)
         click.echo("ozm: allowed (config)", err=True)
         result = _run_command(args)
         sys.exit(result.returncode)
@@ -406,14 +459,14 @@ def _cmd_impl(
     try:
         hashes = load_hashes()
     except (OSError, RuntimeError) as exc:
-        audit_log("error", "cmd", command, str(exc))
+        audit_log("error", audit_kind, command, str(exc))
         raise click_error(
             f"approval cache error: {exc}. The command was NOT executed.",
             CONFIG_ERROR,
         ) from exc
 
     if hashes.get(key) == current_hash:
-        audit_log("cached", "cmd", command)
+        audit_log("cached", audit_kind, command)
         click.echo("ozm: allowed (cached)", err=True)
         result = _run_command(args)
         sys.exit(result.returncode)
@@ -428,23 +481,24 @@ def _cmd_impl(
             run_command = shlex.join(run_args)
         if github_proxy:
             if not run_args or run_args[0] != "gh":
-                audit_log("blocked", "cmd", run_command, "ozm gh edit removed gh")
+                audit_log("blocked", "gh", run_command, "ozm gh edit removed gh")
                 raise click_error(
                     "an edited 'ozm gh' command must remain a GitHub CLI command",
                     BLOCKED,
                 )
+            _validate_github_proxy_args(run_args, agent)
         else:
             _reject_gh_via_cmd(run_args, agent)
         run_disallowed = disallowed_command_reason(run_command)
         if run_disallowed:
-            audit_log("blocked", "cmd", run_command)
+            audit_log("blocked", audit_kind, run_command)
             click.echo(f"ozm: blocked command '{command_name(run_command)}'", err=True)
             click.echo(f"ozm: {run_disallowed}", err=True)
             sys.exit(BLOCKED)
         if run_command != command:
             recheck = is_command_blocked(run_command)
             if recheck:
-                audit_log("blocked", "cmd", run_command)
+                audit_log("blocked", audit_kind, run_command)
                 click.echo(f"ozm: edited command blocked by pattern '{recheck}'", err=True)
                 sys.exit(BLOCKED)
             _require_recent_chmod_confirmation(
@@ -459,7 +513,7 @@ def _cmd_impl(
             try:
                 added = add_allowed_command(allow_pattern, global_scope=approval.apply_globally)
             except (OSError, RuntimeError) as exc:
-                audit_log("error", "cmd", run_command, str(exc))
+                audit_log("error", audit_kind, run_command, str(exc))
                 raise click_error(
                     f"could not save {scope} allowlist pattern '{allow_pattern}': {exc}. "
                     "The command was NOT executed.",
@@ -482,12 +536,12 @@ def _cmd_impl(
         try:
             save_hashes(hashes)
         except (OSError, RuntimeError) as exc:
-            audit_log("error", "cmd", run_command, str(exc))
+            audit_log("error", audit_kind, run_command, str(exc))
             raise click_error(
                 f"could not save approval cache: {exc}. The command was NOT executed.",
                 CONFIG_ERROR,
             ) from exc
-        audit_log("clicked", "cmd", run_command, approval.feedback)
+        audit_log("clicked", audit_kind, run_command, approval.feedback)
         if approval.feedback:
             click.echo(f"ozm: approved cmd — [user] {approval.feedback}", err=True)
         elif run_command != command:
@@ -506,7 +560,7 @@ def _cmd_impl(
             try:
                 added = add_blocked_command(block_pattern, global_scope=approval.apply_globally)
             except (OSError, RuntimeError) as exc:
-                audit_log("error", "cmd", command, str(exc))
+                audit_log("error", audit_kind, command, str(exc))
                 raise click_error(
                     f"could not save {scope} blocklist pattern '{block_pattern}': {exc}. "
                     "The command was NOT executed.",
@@ -517,14 +571,14 @@ def _cmd_impl(
                     f"ozm: added {scope} blocklist pattern: {block_pattern}",
                     err=True,
                 )
-        audit_log("denied", "cmd", command, approval.feedback)
+        audit_log("denied", audit_kind, command, approval.feedback)
         if approval.feedback:
             click.echo(f"ozm: denied cmd — [user] {approval.feedback}", err=True)
         else:
             click.echo("ozm: denied cmd", err=True)
         sys.exit(DENIED)
 
-    audit_log("no-dialog", "cmd", command, approval.feedback)
+    audit_log("no-dialog", audit_kind, command, approval.feedback)
     click.echo(f"ozm: {command}")
     if approval.feedback:
         click.echo(f"ozm: dialog error: [ozm] {approval.feedback}", err=True)

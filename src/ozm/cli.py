@@ -146,7 +146,8 @@ def trust_cmd(check_only: bool, json_output: bool) -> None:
 TIPS = [
     "Use 'ozm gh' for all GitHub operations. Direct 'gh' and 'ozm cmd gh' "
     "forms are rejected. Proven reads run directly, while writes and unknown "
-    "operations keep the normal approval checks.",
+    "operations keep the normal approval checks. Use 'ozm gh pr review-reply' "
+    "instead of a raw review-reply POST.",
     "Do not run chmod +x before 'ozm run'. A script only needs a shebang; ozm "
     "executes reviewed content from a private, user-executable snapshot. Use "
     "chmod only when the source file mode itself must change.",

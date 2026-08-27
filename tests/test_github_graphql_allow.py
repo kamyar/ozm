@@ -78,7 +78,7 @@ class GitHubGraphQLReadAutoAllowTests(unittest.TestCase):
         request_approval.assert_not_called()
         load_hashes.assert_not_called()
         run_command.assert_called_once_with(args)
-        audit_log.assert_called_once_with("semantic", "cmd", shlex.join(args), "github graphql query")
+        audit_log.assert_called_once_with("semantic", "gh", shlex.join(args), "github graphql query")
         self.assertIn("allowed (github graphql query)", result.output)
 
     def test_named_github_graphql_query_with_operation_name_runs_without_approval(self):

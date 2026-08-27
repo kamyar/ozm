@@ -154,9 +154,12 @@ Run GitHub CLI operations through the same policy engine as `ozm cmd`:
 ```bash
 ozm gh --agent-name "Inspect PR" --agent-description "Read PR checks and review state." pr checks 123 --repo owner/repo
 ozm gh --agent-name "Read API" --agent-description "Read paginated review comments." api --paginate repos/owner/repo/pulls/123/comments --jq '.[] | {id,path,line}'
+ozm gh --agent-name "Reply to review" --agent-description "Reply to one PR review comment." pr review-reply --repo owner/repo --number 123 --comment-id 456 --body-file reply.md
 ```
 
-Use `ozm gh` instead of direct `gh` or `ozm cmd gh ...` commands. Ozm resolves the real `gh` executable from trusted system locations before execution. Known high-level reads, REST `GET` and `HEAD` requests, and proven GraphQL queries run directly. Writes and unknown operations continue through project/global blocklists, allowlists, the approval cache, and the approval dialog.
+Use `ozm gh` instead of direct `gh` or `ozm cmd gh ...` commands. Ozm resolves the real `gh` executable from trusted system locations before execution. Known high-level reads, REST `GET` and `HEAD` requests, and proven GraphQL queries run directly. Writes and unknown operations continue through project/global blocklists, allowlists, the approval cache, and the approval dialog. Native proxy operations use `gh` as the audit kind, so they are distinct from generic `cmd` entries.
+
+`pr review-reply` validates `OWNER/REPOSITORY`, the pull-request number, the review-comment ID, and exactly one of `--body` or `--body-file`. It then uses a fixed GitHub review-reply endpoint. A matching raw `gh api -X POST repos/OWNER/REPOSITORY/pulls/NUMBER/comments/COMMENT_ID/replies ...` request is blocked before policy, cache, or approval checks. Ozm prints the equivalent typed command.
 
 To pass `--help` to the underlying GitHub CLI, use `ozm gh --agent-name "Read GitHub help" --agent-description "Show GitHub CLI help." -- --help`. A plain `ozm gh --help` shows proxy help.
 
