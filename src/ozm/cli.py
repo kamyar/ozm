@@ -177,7 +177,8 @@ TIPS = [
     "status/log/diff before anything that mutates files or state.",
     "Avoid complex commands. Use root-level '--grep TERM' and '--head N' "
     "options to filter command stdout without a shell pipeline. Repeat grep "
-    "terms for OR matching. Keep other commands simple and single-purpose.",
+    "terms for OR matching. Filters preserve child exit codes, so do not add "
+    "'|| true' or pipe output to true.",
     "Avoid hacky shell wrappers. Things like 'bash -lc ...', inline 'python -c', "
     "or shell expansion ($(...), backticks) look like bypasses and are blocked — "
     "put real logic in a reviewed script and run it with 'ozm run <script>'.",
