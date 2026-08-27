@@ -199,7 +199,19 @@ def validate_ozm_metadata(part):
     except Exception:
         return "Could not parse ozm command for agent metadata."
     start = _command_start_index(words)
-    if len(words) < start + 2 or words[start] != "ozm" or words[start + 1] not in {"run", "cmd", "git", "shell", "bash"}:
+    if len(words) < start + 2 or words[start] != "ozm":
+        return None
+    subcommand_index = start + 1
+    while subcommand_index < len(words):
+        token = words[subcommand_index]
+        if token == "--grep" and subcommand_index + 1 < len(words):
+            subcommand_index += 2
+            continue
+        if token.startswith("--grep="):
+            subcommand_index += 1
+            continue
+        break
+    if subcommand_index >= len(words) or words[subcommand_index] not in {"run", "cmd", "gh", "git", "shell", "bash"}:
         return None
     json_name = json_description = None
     agent_json = _flag_value(words, "--agent-json")
@@ -210,7 +222,7 @@ def validate_ozm_metadata(part):
     name = _flag_value(words, "--agent-name") or json_name or _metadata_env_value(words, start, "OZM_AGENT_NAME")
     description = _flag_value(words, "--agent-description") or json_description or _metadata_env_value(words, start, "OZM_AGENT_DESCRIPTION")
     if name is None or description is None:
-        return "ozm run/cmd/git requires --agent-name and --agent-description."
+        return "ozm run/cmd/gh/git requires --agent-name and --agent-description."
     if not name.strip():
         return "--agent-name must not be empty."
     if not description.strip():
@@ -343,6 +355,7 @@ All script execution and git operations must go through `ozm`.
 - **Do not wrap direct commands in a script:** `ozm run` rejects scripts with only one executable line. It also rejects disk or in-memory shell files when every command segment invokes `ozm`. Run each Ozm command directly and separately; use `ozm bash --command` only for shell logic that is not a sequence of Ozm commands.
 - **Do not chmod scripts for ozm:** `ozm run` executes a private executable snapshot. The source script only needs a shebang. Use `chmod` only when the source file mode itself must change.
 - **Run commands:** `ozm cmd --agent-name "<work>" --agent-description "<intent>" <command> [args...]` — for arbitrary commands (e.g. `ozm cmd --agent-name "Install deps" --agent-description "Install editable package dependencies." uv pip install -e .`)
+- **Filter output without a pipeline:** use repeatable root options before the command family: `ozm --grep "term" git ...`, `ozm --grep "term" gh ...`, `ozm --grep "term" cmd ...`, or `ozm --grep "term" run ...`. Terms are literal and use OR matching. Do not create `ozm ... | grep ...` shell snippets.
 - **Run GitHub commands:** `ozm gh --agent-name "<work>" --agent-description "<intent>" <gh-args...>` — never use direct `gh` or `ozm cmd gh`; proven reads run directly, while writes and unknown operations keep normal approval checks
 - **Reply to PR reviews:** use `ozm gh ... pr review-reply --repo OWNER/REPOSITORY --number NUMBER --comment-id ID --body-file FILE` — raw review-reply REST POST requests are blocked
 - **Avoid sed:** `sed`/`gsed` are blocked because they can edit files in-place. Use `rg` for searching, `cat`/`nl`/`head`/`tail` for viewing, or `ozm run <script>` for transformations.
@@ -381,6 +394,7 @@ All script execution and git operations must go through `ozm`.
 - **Do not wrap direct commands in a script:** `ozm run` rejects scripts with only one executable line. It also rejects disk or in-memory shell files when every command segment invokes `ozm`. Run each Ozm command directly and separately; use `ozm bash --command` only for shell logic that is not a sequence of Ozm commands.
 - **Do not chmod scripts for ozm:** `ozm run` executes a private executable snapshot. The source script only needs a shebang. Use `chmod` only when the source file mode itself must change.
 - **Run commands:** `ozm cmd --agent-name "<work>" --agent-description "<intent>" <command> [args...]` — for arbitrary commands (e.g. `ozm cmd --agent-name "Install deps" --agent-description "Install editable package dependencies." uv pip install -e .`)
+- **Filter output without a pipeline:** use repeatable root options before the command family: `ozm --grep "term" git ...`, `ozm --grep "term" gh ...`, `ozm --grep "term" cmd ...`, or `ozm --grep "term" run ...`. Terms are literal and use OR matching. Do not create `ozm ... | grep ...` shell snippets.
 - **Run GitHub commands:** `ozm gh --agent-name "<work>" --agent-description "<intent>" <gh-args...>` — never use direct `gh` or `ozm cmd gh`; proven reads run directly, while writes and unknown operations keep normal approval checks
 - **Reply to PR reviews:** use `ozm gh ... pr review-reply --repo OWNER/REPOSITORY --number NUMBER --comment-id ID --body-file FILE` — raw review-reply REST POST requests are blocked
 - **Avoid sed:** `sed`/`gsed` are blocked because they can edit files in-place. Use `rg` for searching, `cat`/`nl`/`head`/`tail` for viewing, or `ozm run <script>` for transformations.

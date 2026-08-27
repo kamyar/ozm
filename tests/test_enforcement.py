@@ -219,6 +219,22 @@ class InstallHookTests(unittest.TestCase):
         self.assertIn(hook, config_text)
         self.assertIn('decision = "forbidden"', rules_text)
 
+    def test_hook_accepts_global_grep_with_agent_metadata(self):
+        result = self.run_hook(
+            'ozm --grep "needle" git --agent-name "Search history" '
+            '--agent-description "Find a term in historical output." show HEAD:file'
+        )
+
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stdout.strip(), "")
+
+    def test_hook_checks_metadata_after_global_grep(self):
+        result = self.run_hook('ozm --grep "needle" git show HEAD:file')
+
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("deny", result.stdout)
+        self.assertIn("requires --agent-name", result.stdout)
+
     def test_hook_blocks_sed_with_alternatives(self):
         result = self.run_hook("sed -n '1p' README.md")
 
