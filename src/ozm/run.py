@@ -5,6 +5,7 @@ import difflib
 import hashlib
 import json
 import os
+import re
 import shlex
 import stat
 import subprocess
@@ -17,7 +18,7 @@ from ozm.approve import request_approval
 from ozm.audit import log as audit_log
 from ozm.exit_codes import BLOCKED, CONFIG_ERROR, DENIED, NO_DIALOG, click_error
 from ozm.config import project_key
-from ozm.output_filter import current_grep_terms, run_with_output_filter
+from ozm.output_filter import output_filter_active, run_with_output_filter
 from ozm.storage import (
     ensure_private_dir,
     load_yaml_no_follow,
@@ -207,7 +208,7 @@ def _execute_script(abs_path: str, args: tuple[str, ...], content: bytes) -> Non
             f.write(content)
         os.chmod(snapshot, stat.S_IRUSR | stat.S_IXUSR)
         env = {**os.environ, "OZM_SCRIPT_PATH": abs_path}
-        if current_grep_terms():
+        if output_filter_active():
             result = run_with_output_filter([snapshot, *args], env=env)
         else:
             result = subprocess.run([snapshot, *args], env=env)
@@ -226,6 +227,44 @@ def _executable_lines(content: str) -> list[str]:
         for line in lines
         if line.strip() and not line.lstrip().startswith("#")
     ]
+
+
+def _generated_head_pipeline_limit(lines: list[str]) -> int | None:
+    """Return the final head limit for a simple Ozm pipeline, if present."""
+    if len(lines) != 1:
+        return None
+    lexer = shlex.shlex(lines[0], posix=True, punctuation_chars=";&|")
+    lexer.whitespace_split = True
+    try:
+        tokens = list(lexer)
+    except ValueError:
+        return None
+    if not tokens or tokens[0] != "ozm":
+        return None
+    pipe_indexes = [index for index, token in enumerate(tokens) if token == "|"]
+    if not pipe_indexes:
+        return None
+    suffix = tokens[pipe_indexes[-1] + 1:]
+    if not suffix or os.path.basename(suffix[0]) != "head":
+        return None
+    head_args = suffix[1:]
+    if not head_args:
+        return 10
+    if len(head_args) == 1:
+        if re.fullmatch(r"-[1-9][0-9]*", head_args[0]):
+            return int(head_args[0][1:])
+        short_match = re.fullmatch(r"-n([1-9][0-9]*)", head_args[0])
+        if short_match:
+            return int(short_match.group(1))
+        match = re.fullmatch(r"--lines=([1-9][0-9]*)", head_args[0])
+        return int(match.group(1)) if match else None
+    if (
+        len(head_args) == 2
+        and head_args[0] in ("-n", "--lines")
+        and re.fullmatch(r"[1-9][0-9]*", head_args[1])
+    ):
+        return int(head_args[1])
+    return None
 
 
 def _all_ozm_invocations(lines: list[str]) -> bool:
@@ -293,6 +332,21 @@ def _run_reviewed_script(
     current_hash = compute_content_hash(content)
     display_content = content.decode("utf-8", errors="replace")
     executable_lines = _executable_lines(display_content)
+    head_limit = (
+        _generated_head_pipeline_limit(executable_lines)
+        if key_target.startswith(SHELL_PREFIX)
+        else None
+    )
+    if head_limit is not None:
+        reason = "use root --head instead of a generated shell pipeline"
+        audit_log("blocked", "run", audit_target, reason)
+        _cleanup(cleanup_path)
+        raise click_error(
+            "generated shell pipelines ending in 'head' are not allowed. "
+            f"Put '--head {head_limit}' before the Ozm command family instead. "
+            "Combine it with repeatable root '--grep TERM' options when needed.",
+            BLOCKED,
+        )
     if _all_ozm_invocations(executable_lines):
         reason = "run ozm commands directly instead of through a reviewed file"
         audit_log("blocked", "run", audit_target, reason)

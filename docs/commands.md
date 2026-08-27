@@ -64,19 +64,20 @@ flowchart TD
 
 ---
 
-## `ozm --grep TERM` — Shell-Free Output Filtering
+## `ozm --grep TERM` and `ozm --head N` — Shell-Free Output Filtering
 
-Put `--grep TERM` before `cmd`, `gh`, `git`, or `run` to show only stdout lines that contain the literal term. Repeat the option to match any term:
+Put output options before `cmd`, `gh`, `git`, or `run`. Use `--grep TERM` to show stdout lines that contain a literal term. Repeat it to match any term. Use `--head N` to show at most N filtered lines:
 
 ```bash
 ozm --grep "func previewOrderV2FacetSpecsForProjection" \
   --grep "coverageUnresolvedSelectionSource" \
+  --head 20 \
   git --agent-name "Inspect preview order" \
   --agent-description "Find projection code in the main branch file." \
   show origin/main:path/to/config.go
 ```
 
-This form avoids an in-memory shell approval for `ozm git show ... | grep ...`. Matching is case-sensitive. Stderr remains visible. If the child command succeeds but no stdout line matches, Ozm returns exit code 1. The output filter does not change command policy, approval, or audit classification.
+These options avoid in-memory shell approvals for pipelines such as `ozm git show ... | grep ... | head -n 20`. Literal grep matching is case-sensitive. Ozm applies `--grep` before `--head`, leaves stderr visible, and continues consuming stdout until the child finishes. If the child succeeds but grep finds no line, Ozm returns exit code 1. A head-only filter preserves the child exit code. Output filters do not change command policy, approval, or audit classification. Before opening an approval dialog, Ozm rejects generated `shell:` content that ends in supported `head`, `head -N`, `head -n N`, or `head --lines=N` forms and prints the equivalent root `--head N` nudge.
 
 ---
 

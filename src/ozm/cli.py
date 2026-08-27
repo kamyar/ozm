@@ -37,6 +37,13 @@ def _get_version() -> str:
 
 @click.group()
 @click.option(
+    "--head",
+    "head_lines",
+    type=click.IntRange(min=1),
+    metavar="N",
+    help="Show at most N filtered stdout lines.",
+)
+@click.option(
     "--grep",
     "grep_terms",
     multiple=True,
@@ -44,7 +51,7 @@ def _get_version() -> str:
     help="Show stdout lines containing TERM. Repeat for OR matching.",
 )
 @click.version_option(version=_get_version(), prog_name="ozm")
-def cli(grep_terms: tuple[str, ...]):
+def cli(grep_terms: tuple[str, ...], head_lines: int | None):
     """Content-aware script execution gate and git rule enforcer."""
     if any(term == "" for term in grep_terms):
         raise click.BadParameter("must not be empty", param_hint="--grep")
@@ -168,9 +175,9 @@ TIPS = [
     "generated shell snippet; invoke each ozm command directly and separately.",
     "Prefer read-only tools. Reach for rg, cat, nl, head, tail, ls, and git "
     "status/log/diff before anything that mutates files or state.",
-    "Avoid complex commands. Use repeatable root-level '--grep TERM' options "
-    "to filter command stdout without a shell pipeline. Keep other commands "
-    "simple and single-purpose.",
+    "Avoid complex commands. Use root-level '--grep TERM' and '--head N' "
+    "options to filter command stdout without a shell pipeline. Repeat grep "
+    "terms for OR matching. Keep other commands simple and single-purpose.",
     "Avoid hacky shell wrappers. Things like 'bash -lc ...', inline 'python -c', "
     "or shell expansion ($(...), backticks) look like bypasses and are blocked — "
     "put real logic in a reviewed script and run it with 'ozm run <script>'.",
