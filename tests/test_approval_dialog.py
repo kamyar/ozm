@@ -93,6 +93,49 @@ class ApprovalTemporaryFileTests(unittest.TestCase):
         self.assertFalse(os.path.exists(captured_path))
 
 
+class FileApprovalPayloadTests(unittest.TestCase):
+    def test_generated_file_payload_has_indicator_and_logical_path(self):
+        agent = AgentMetadata("Shell review", "Review generated shell content.")
+        response = {"decision": "deny"}
+
+        with patch.object(approve_mod, "_socket_send", return_value=response) as send:
+            result = approve_mod._try_socket_file(
+                "/tmp/private-implementation-path.sh",
+                "NEW",
+                agent,
+                None,
+                content="#!/usr/bin/env bash\necho one | cat\n",
+                display_path="shell:pi-command",
+                generated_in_memory=True,
+            )
+
+        self.assertIs(result.approved, False)
+        request = send.call_args.args[0]
+        self.assertEqual(request["payload"]["script"], "shell:pi-command")
+        self.assertTrue(request["payload"]["generated_in_memory"])
+        self.assertEqual(request["payload"]["line_count"], 2)
+
+    def test_disk_file_payload_is_not_marked_as_generated(self):
+        agent = AgentMetadata("Disk review", "Review a source file.")
+        response = {"decision": "deny"}
+
+        with patch.object(approve_mod, "_socket_send", return_value=response) as send:
+            approve_mod._try_socket_file(
+                "source.sh",
+                "NEW",
+                agent,
+                None,
+                content="#!/usr/bin/env bash\necho one\n",
+            )
+
+        request = send.call_args.args[0]
+        self.assertEqual(
+            request["payload"]["script"],
+            os.path.abspath("source.sh"),
+        )
+        self.assertFalse(request["payload"]["generated_in_memory"])
+
+
 class CommandApprovalParserTests(unittest.TestCase):
     def _parse(self, stdout):
         result = subprocess.CompletedProcess(
@@ -312,6 +355,29 @@ class SocketFallbackTests(unittest.TestCase):
 
         self.assertIs(result.approved, True)
         mock_macos.assert_called_once()
+
+    def test_request_approval_forwards_generated_metadata_to_fallback(self):
+        agent = AgentMetadata("test", "test description")
+        fake_result = approve_mod.ApprovalResult(approved=False)
+
+        with patch.object(approve_mod, "_try_socket_file", return_value=None), \
+            patch.object(
+                approve_mod,
+                "_approve_file_macos",
+                return_value=fake_result,
+            ) as mock_macos, \
+            patch.object(approve_mod.platform, "system", return_value="Darwin"), \
+            patch.object(approve_mod, "_get_git_diff", return_value=None):
+            approve_mod.request_approval(
+                "generated.sh",
+                "NEW",
+                agent,
+                display_path="shell:generated",
+                generated_in_memory=True,
+            )
+
+        self.assertEqual(mock_macos.call_args.kwargs["display_path"], "shell:generated")
+        self.assertTrue(mock_macos.call_args.kwargs["generated_in_memory"])
 
     def test_request_approval_uses_socket_when_available(self):
         agent = AgentMetadata("test", "test description")

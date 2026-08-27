@@ -75,6 +75,11 @@ struct MenuBarView: View {
                                 .lineLimit(1)
                         }
                         Spacer()
+                        if item.request.payload.generatedInMemory == true {
+                            Image(systemName: "memorychip")
+                                .foregroundStyle(.orange)
+                                .help("Ozm generated this in-memory review file.")
+                        }
                     }
                     HStack(spacing: 6) {
                         MenuBarFeedbackField(item: item, queue: queue, windowManager: windowManager)

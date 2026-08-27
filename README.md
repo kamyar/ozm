@@ -8,7 +8,7 @@ Most agent setups force a bad choice: babysit every command, or trust the agent 
 - **Command approval and caching**: arbitrary argv-style commands run through `ozm cmd`, with exact command approvals cached per project.
 - **Global and per-project rules**: allowlist safe command patterns, block dangerous ones, and keep trusted project config outside the repo.
 - **Agent work context**: every `ozm run`, `ozm cmd`, and `ozm git` call must include `--agent-name` and `--agent-description`, so approval dialogs show what the agent is trying to do.
-- **Native macOS dialogs**: approvals include syntax highlighting, dark mode support, editable commands, rule creation, global/project scope, and inline feedback for the agent.
+- **Native macOS dialogs**: approvals include syntax highlighting, dark mode support, an Ozm in-memory file indicator for generated content, editable commands, rule creation, global/project scope, and inline feedback for the agent.
 - **One-time overrides**: blocked config matches and git policy violations can be escalated with `--reason` for explicit user approval without changing caches or allowlists.
 - **Git guardrails**: commit message limits, optional attribution and branch rules, no force pushes, no main/master pushes, and dangerous git config/subcommands are blocked.
 - **Codex and Claude Code enforcement**: install hooks route direct shell work through `ozm` and write agent instructions for the project.
