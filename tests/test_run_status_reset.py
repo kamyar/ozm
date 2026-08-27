@@ -248,6 +248,49 @@ class DirectOzmScriptTests(unittest.TestCase):
         load_hashes.assert_not_called()
         request_approval.assert_not_called()
 
+    def test_in_memory_shell_nudges_final_head_pipeline(self):
+        with patch.object(run_mod, "load_hashes") as load_hashes, \
+             patch.object(run_mod, "request_approval") as request_approval, \
+             patch.object(run_mod, "audit_log") as audit_log:
+            result = CliRunner().invoke(
+                shell_mod.shell_cmd,
+                ["--command", "ozm git show HEAD:file | head -n 25", *META],
+            )
+
+        self.assertEqual(result.exit_code, run_mod.BLOCKED)
+        self.assertIn("--head 25", result.output)
+        self.assertIn("before the Ozm command family", result.output)
+        load_hashes.assert_not_called()
+        request_approval.assert_not_called()
+        audit_log.assert_called_once_with(
+            "blocked",
+            "run",
+            "shell:shell-command",
+            "use root --head instead of a generated shell pipeline",
+        )
+
+    def test_head_pipeline_nudge_ignores_quoted_pipe_text(self):
+        self.assertIsNone(
+            run_mod._generated_head_pipeline_limit([
+                "ozm cmd printf 'value | head -n 2'"
+            ])
+        )
+
+    def test_head_pipeline_nudge_supports_normal_head_forms(self):
+        cases = {
+            "ozm git show HEAD:file | head": 10,
+            "ozm git show HEAD:file | head -20": 20,
+            "ozm git show HEAD:file | head -n20": 20,
+            "ozm git show HEAD:file | head --lines=20": 20,
+            "ozm git show HEAD:file | head --lines 20": 20,
+        }
+        for command, expected in cases.items():
+            with self.subTest(command=command):
+                self.assertEqual(
+                    run_mod._generated_head_pipeline_limit([command]),
+                    expected,
+                )
+
     def test_mixed_script_continues_to_normal_approval(self):
         runner = CliRunner()
         with runner.isolated_filesystem():

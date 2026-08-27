@@ -33,7 +33,7 @@ from ozm.github_operations import (
     parse_review_reply,
     review_reply_execution_args,
 )
-from ozm.output_filter import current_grep_terms, run_with_output_filter
+from ozm.output_filter import output_filter_active, run_with_output_filter
 from ozm.paths import trusted_executable
 from ozm.run import load_hashes, save_hashes
 
@@ -64,7 +64,7 @@ def _run_command(argv: list[str]) -> subprocess.CompletedProcess:
                 "trusted gh executable was not found in a system location"
             )
         execution_argv[0] = gh
-    if current_grep_terms():
+    if output_filter_active():
         return run_with_output_filter(execution_argv)
     return subprocess.run(execution_argv)
 

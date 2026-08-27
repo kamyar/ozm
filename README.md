@@ -96,15 +96,15 @@ ozm run --agent-name "Run tests" --agent-description "Execute the reviewed test 
 
 Scripts must have a shebang, but the source file does not need an executable file mode. Do not run `chmod +x` before `ozm run`; ozm executes the reviewed content from a private, user-executable snapshot. Ozm rejects scripts with only one executable line before cache or approval checks. It also rejects disk, stdin, and generated in-memory shell files when every command segment is an `ozm` invocation. Run those Ozm commands directly and one at a time so normal automatic approvals can apply. Run other single commands directly with `ozm cmd`, `ozm gh`, or `ozm git`; use `ozm bash --command` when shell syntax is required. The first approval stores the script's SHA-256 hash under the current project. Unchanged scripts run without prompting; changed scripts show a diff against the last approved snapshot before they can run again.
 
-### Shell-free output filtering: `ozm --grep`
+### Shell-free output filtering: `ozm --grep` and `ozm --head`
 
-Put repeatable `--grep TERM` options before the command family to show only stdout lines that contain any selected literal term:
+Put output options before the command family. Repeat `--grep TERM` to show stdout lines that contain any selected literal term. Use `--head N` to show at most N lines:
 
 ```bash
-ozm --grep "projection" --grep "coverage" git --agent-name "Inspect main" --agent-description "Find projection and coverage code on main." show origin/main:path/to/config.go
+ozm --grep "projection" --grep "coverage" --head 20 git --agent-name "Inspect main" --agent-description "Find projection and coverage code on main." show origin/main:path/to/config.go
 ```
 
-The filter works with `ozm cmd`, `ozm gh`, `ozm git`, and `ozm run`. It streams matching stdout lines, leaves stderr unchanged, and returns exit code 1 when the child succeeds but no line matches. Use it instead of creating a shell pipeline with `grep` or `rg` only to filter output.
+The filters work with `ozm cmd`, `ozm gh`, `ozm git`, and `ozm run`. When combined, Ozm applies `--grep` before `--head`. Ozm leaves stderr unchanged and continues consuming stdout until the child finishes. A grep with no matches returns exit code 1. Use these options instead of creating a shell pipeline with `grep`, `rg`, or `head` only to filter output. Ozm rejects generated shell pipelines that end in a supported `head` form and prints the equivalent root `--head N` nudge before opening an approval dialog.
 
 ### Commands: `ozm cmd`
 

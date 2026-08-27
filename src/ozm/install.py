@@ -204,10 +204,10 @@ def validate_ozm_metadata(part):
     subcommand_index = start + 1
     while subcommand_index < len(words):
         token = words[subcommand_index]
-        if token == "--grep" and subcommand_index + 1 < len(words):
+        if token in {"--grep", "--head"} and subcommand_index + 1 < len(words):
             subcommand_index += 2
             continue
-        if token.startswith("--grep="):
+        if token.startswith(("--grep=", "--head=")):
             subcommand_index += 1
             continue
         break
@@ -355,7 +355,7 @@ All script execution and git operations must go through `ozm`.
 - **Do not wrap direct commands in a script:** `ozm run` rejects scripts with only one executable line. It also rejects disk or in-memory shell files when every command segment invokes `ozm`. Run each Ozm command directly and separately; use `ozm bash --command` only for shell logic that is not a sequence of Ozm commands.
 - **Do not chmod scripts for ozm:** `ozm run` executes a private executable snapshot. The source script only needs a shebang. Use `chmod` only when the source file mode itself must change.
 - **Run commands:** `ozm cmd --agent-name "<work>" --agent-description "<intent>" <command> [args...]` — for arbitrary commands (e.g. `ozm cmd --agent-name "Install deps" --agent-description "Install editable package dependencies." uv pip install -e .`)
-- **Filter output without a pipeline:** use repeatable root options before the command family: `ozm --grep "term" git ...`, `ozm --grep "term" gh ...`, `ozm --grep "term" cmd ...`, or `ozm --grep "term" run ...`. Terms are literal and use OR matching. Do not create `ozm ... | grep ...` shell snippets.
+- **Filter output without a pipeline:** use root options before the command family: `ozm --grep "term" --head 20 git ...`, `ozm --head 20 gh ...`, `ozm --head 20 cmd ...`, or `ozm --head 20 run ...`. Grep terms are literal and repeat for OR matching. Ozm applies grep before head. Do not create `ozm ... | grep ...` or `ozm ... | head ...` shell snippets.
 - **Run GitHub commands:** `ozm gh --agent-name "<work>" --agent-description "<intent>" <gh-args...>` — never use direct `gh` or `ozm cmd gh`; proven reads run directly, while writes and unknown operations keep normal approval checks
 - **Reply to PR reviews:** use `ozm gh ... pr review-reply --repo OWNER/REPOSITORY --number NUMBER --comment-id ID --body-file FILE` — raw review-reply REST POST requests are blocked
 - **Avoid sed:** `sed`/`gsed` are blocked because they can edit files in-place. Use `rg` for searching, `cat`/`nl`/`head`/`tail` for viewing, or `ozm run <script>` for transformations.
@@ -394,7 +394,7 @@ All script execution and git operations must go through `ozm`.
 - **Do not wrap direct commands in a script:** `ozm run` rejects scripts with only one executable line. It also rejects disk or in-memory shell files when every command segment invokes `ozm`. Run each Ozm command directly and separately; use `ozm bash --command` only for shell logic that is not a sequence of Ozm commands.
 - **Do not chmod scripts for ozm:** `ozm run` executes a private executable snapshot. The source script only needs a shebang. Use `chmod` only when the source file mode itself must change.
 - **Run commands:** `ozm cmd --agent-name "<work>" --agent-description "<intent>" <command> [args...]` — for arbitrary commands (e.g. `ozm cmd --agent-name "Install deps" --agent-description "Install editable package dependencies." uv pip install -e .`)
-- **Filter output without a pipeline:** use repeatable root options before the command family: `ozm --grep "term" git ...`, `ozm --grep "term" gh ...`, `ozm --grep "term" cmd ...`, or `ozm --grep "term" run ...`. Terms are literal and use OR matching. Do not create `ozm ... | grep ...` shell snippets.
+- **Filter output without a pipeline:** use root options before the command family: `ozm --grep "term" --head 20 git ...`, `ozm --head 20 gh ...`, `ozm --head 20 cmd ...`, or `ozm --head 20 run ...`. Grep terms are literal and repeat for OR matching. Ozm applies grep before head. Do not create `ozm ... | grep ...` or `ozm ... | head ...` shell snippets.
 - **Run GitHub commands:** `ozm gh --agent-name "<work>" --agent-description "<intent>" <gh-args...>` — never use direct `gh` or `ozm cmd gh`; proven reads run directly, while writes and unknown operations keep normal approval checks
 - **Reply to PR reviews:** use `ozm gh ... pr review-reply --repo OWNER/REPOSITORY --number NUMBER --comment-id ID --body-file FILE` — raw review-reply REST POST requests are blocked
 - **Avoid sed:** `sed`/`gsed` are blocked because they can edit files in-place. Use `rg` for searching, `cat`/`nl`/`head`/`tail` for viewing, or `ozm run <script>` for transformations.

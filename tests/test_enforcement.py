@@ -221,7 +221,7 @@ class InstallHookTests(unittest.TestCase):
 
     def test_hook_accepts_global_grep_with_agent_metadata(self):
         result = self.run_hook(
-            'ozm --grep "needle" git --agent-name "Search history" '
+            'ozm --grep "needle" --head 20 git --agent-name "Search history" '
             '--agent-description "Find a term in historical output." show HEAD:file'
         )
 
@@ -229,7 +229,7 @@ class InstallHookTests(unittest.TestCase):
         self.assertEqual(result.stdout.strip(), "")
 
     def test_hook_checks_metadata_after_global_grep(self):
-        result = self.run_hook('ozm --grep "needle" git show HEAD:file')
+        result = self.run_hook('ozm --head 20 git show HEAD:file')
 
         self.assertEqual(result.returncode, 0)
         self.assertIn("deny", result.stdout)

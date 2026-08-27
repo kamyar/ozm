@@ -13,7 +13,7 @@ from ozm.approve import request_override
 from ozm.audit import log as audit_log
 from ozm.config import commit_config
 from ozm.exit_codes import BLOCKED, DENIED, NO_DIALOG
-from ozm.output_filter import current_grep_terms, run_with_output_filter
+from ozm.output_filter import output_filter_active, run_with_output_filter
 from ozm.paths import trusted_executable
 
 MAX_SUBJECT_LENGTH = 72
@@ -84,7 +84,7 @@ def _git_binary() -> str:
 
 
 def _run_git(argv: list[str]) -> subprocess.CompletedProcess:
-    if current_grep_terms():
+    if output_filter_active():
         return run_with_output_filter(argv)
     return subprocess.run(argv)
 
