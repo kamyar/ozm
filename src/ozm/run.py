@@ -343,6 +343,7 @@ def _run_reviewed_script(
             content=display_content,
             snapshot_diff=snap_diff,
             display_path=dialog_display_path,
+            generated_in_memory=dialog_display_path is not None,
         )
 
         if approval.approved is True:

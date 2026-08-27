@@ -14,7 +14,7 @@ ozm run --agent-name "<work>" --agent-description "<one-line intent>" <script> [
 $ ozm run --agent-name "Deploy production" --agent-description "Run the reviewed production deployment script." deploy.sh production
 ```
 
-A native macOS dialog appears showing the full file with syntax highlighting. You can Allow or Deny, with an optional feedback message that gets printed to stderr for the agent to read.
+A native macOS dialog appears showing the full file with syntax highlighting. You can Allow or Deny, with an optional feedback message that gets printed to stderr for the agent to read. Generated stdin and `shell:` approvals show an orange **Ozm in-memory file** indicator and their logical name instead of a temporary implementation path.
 
 If the file has changed since last approval, the dialog shows a syntax-highlighted diff instead of the full file.
 

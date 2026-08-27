@@ -94,6 +94,8 @@ def _try_socket_file(
     agent: AgentMetadata,
     diff: str | None,
     content: str | None = None,
+    display_path: str | None = None,
+    generated_in_memory: bool = False,
 ) -> ApprovalResult | None:
     abs_path = os.path.abspath(script)
     if content is None:
@@ -109,12 +111,13 @@ def _try_socket_file(
         "type": "file_approval",
         "agent": {"name": agent.name, "description": agent.description},
         "payload": {
-            "script": abs_path,
+            "script": display_path or abs_path,
             "label": label,
             "content": content,
             "diff": diff,
             "line_count": line_count,
             "syntax": _detect_syntax(abs_path),
+            "generated_in_memory": generated_in_memory,
         },
     }
     return _parse_socket_response(_socket_send(request))
@@ -162,22 +165,38 @@ def request_approval(
     content: str | None = None,
     snapshot_diff: str | None = None,
     display_path: str | None = None,
+    generated_in_memory: bool = False,
 ) -> ApprovalResult:
     """Ask the user to review and approve a script via OS-native UI.
 
     When `content` is given, the review dialogs display exactly that content
     instead of re-reading the script from disk, so what the user approves is
-    what the caller will execute.
+    what the caller will execute. `generated_in_memory` identifies content
+    created by Ozm instead of a source file supplied from disk.
     """
     diff = _get_git_diff(script) if label == "CHANGED" else None
     if diff is None and snapshot_diff is not None:
         diff = snapshot_diff
-    result = _try_socket_file(script, label, agent, diff, content=content)
+    result = _try_socket_file(
+        script,
+        label,
+        agent,
+        diff,
+        content=content,
+        display_path=display_path,
+        generated_in_memory=generated_in_memory,
+    )
     if result is not None:
         return result
     if platform.system() == "Darwin":
         return _approve_file_macos(
-            script, label, agent, diff=diff, display_path=display_path, content=content
+            script,
+            label,
+            agent,
+            diff=diff,
+            display_path=display_path,
+            content=content,
+            generated_in_memory=generated_in_memory,
         )
     return ApprovalResult(approved=None)
 
@@ -436,19 +455,21 @@ def _approve_file_macos(
     diff: str | None = None,
     display_path: str | None = None,
     content: str | None = None,
+    generated_in_memory: bool = False,
 ) -> ApprovalResult:
     abs_path = os.path.abspath(script)
     shown_path = display_path or abs_path
     line_count = len(content.splitlines()) if content is not None else _count_lines(script)
     title = f"[{label}] {agent.name}"
     agent_context = _agent_context(agent)
+    source_context = "Generated in memory by Ozm — " if generated_in_memory else ""
 
     rtf_tmp = None
     diff_tmp = None
     plain_tmp = None
 
     if diff:
-        subtitle = f"{agent_context} — {shown_path} — diff ({line_count} lines total)"
+        subtitle = f"{agent_context} — {source_context}{shown_path} — diff ({line_count} lines total)"
         diff_rtf = _render_diff_rtf(diff)
         if diff_rtf:
             diff_tmp = _secure_tmpfile(".rtf", diff_rtf)
@@ -459,7 +480,7 @@ def _approve_file_macos(
             load_section = _LOAD_PLAIN.replace("__FILEPATH__", _escape(diff_tmp))
             set_section = _SET_PLAIN
     else:
-        subtitle = f"{agent_context} — {shown_path} — {line_count} lines"
+        subtitle = f"{agent_context} — {source_context}{shown_path} — {line_count} lines"
         rtf_content = _render_rtf(abs_path, content)
         if rtf_content:
             rtf_tmp = _secure_tmpfile(".rtf", rtf_content)

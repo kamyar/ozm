@@ -123,6 +123,9 @@ struct FileApprovalDetail: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
+            if payload.generatedInMemory == true {
+                GeneratedInMemoryBadge()
+            }
             if let script = payload.script {
                 Label(script, systemImage: "doc")
                     .font(.caption.monospaced())

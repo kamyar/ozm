@@ -179,6 +179,7 @@ class StdinShellTests(unittest.TestCase):
         self.assertEqual(result.exit_code, 0, result.output)
         self.assertIn(run_mod.project_key("stdin:pi-test"), saved_hashes)
         self.assertEqual(request_approval.call_args.kwargs["display_path"], "stdin:pi-test")
+        self.assertTrue(request_approval.call_args.kwargs["generated_in_memory"])
         argv = subprocess_run.call_args.args[0]
         self.assertEqual(len(argv), 1)
         self.assertFalse(os.path.exists(argv[0]))
@@ -198,6 +199,11 @@ class StdinShellTests(unittest.TestCase):
 
         self.assertEqual(result.exit_code, run_mod.DENIED)
         request_approval.assert_called_once()
+        self.assertTrue(request_approval.call_args.kwargs["generated_in_memory"])
+        self.assertEqual(
+            request_approval.call_args.kwargs["display_path"],
+            "shell:pi-shell",
+        )
         self.assertNotIn("one-command scripts are not allowed", result.output)
 
     def test_bash_command_is_converted_to_reviewed_stdin_script(self):

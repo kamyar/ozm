@@ -129,6 +129,9 @@ struct ApprovalWindowContent: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
+            if item.request.payload.generatedInMemory == true {
+                GeneratedInMemoryBadge()
+            }
         }
         .padding()
     }
@@ -300,6 +303,23 @@ struct ApprovalWindowContent: View {
             applyGlobally: applyGlobally
         ))
         onDismiss()
+    }
+}
+
+struct GeneratedInMemoryBadge: View {
+    var body: some View {
+        Label("Ozm in-memory file", systemImage: "memorychip")
+            .font(.caption.weight(.medium))
+            .foregroundStyle(.orange)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(Color.orange.opacity(0.12))
+            .clipShape(Capsule())
+            .overlay(
+                Capsule()
+                    .stroke(Color.orange.opacity(0.35))
+            )
+            .help("Ozm generated this temporary review file. It is not a source file on disk.")
     }
 }
 

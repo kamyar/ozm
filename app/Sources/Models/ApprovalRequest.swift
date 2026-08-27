@@ -27,6 +27,7 @@ struct ApprovalRequest: Codable, Sendable {
         var diff: String?
         var lineCount: Int?
         var syntax: String?
+        var generatedInMemory: Bool?
 
         // cmd_approval + override
         var command: String?
@@ -38,6 +39,7 @@ struct ApprovalRequest: Codable, Sendable {
         enum CodingKeys: String, CodingKey {
             case script, label, content, diff
             case lineCount = "line_count"
+            case generatedInMemory = "generated_in_memory"
             case syntax, command, violation, reason
         }
     }
