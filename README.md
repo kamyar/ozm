@@ -94,7 +94,7 @@ Use `ozm run` for scripts, not `python script.py`, `bash script.sh`, `uv run`, o
 ozm run --agent-name "Run tests" --agent-description "Execute the reviewed test script." ./scripts/test.sh
 ```
 
-Scripts must have a shebang, but the source file does not need an executable file mode. Do not run `chmod +x` before `ozm run`; ozm executes the reviewed content from a private, user-executable snapshot. Ozm rejects scripts with only one executable line before cache or approval checks. Run that command directly with `ozm cmd`, `ozm gh`, or `ozm git`; use `ozm bash --command` when shell syntax is required. The first approval stores the script's SHA-256 hash under the current project. Unchanged scripts run without prompting; changed scripts show a diff against the last approved snapshot before they can run again.
+Scripts must have a shebang, but the source file does not need an executable file mode. Do not run `chmod +x` before `ozm run`; ozm executes the reviewed content from a private, user-executable snapshot. Ozm rejects scripts with only one executable line before cache or approval checks. It also rejects disk, stdin, and generated in-memory shell files when every command segment is an `ozm` invocation. Run those Ozm commands directly and one at a time so normal automatic approvals can apply. Run other single commands directly with `ozm cmd`, `ozm gh`, or `ozm git`; use `ozm bash --command` when shell syntax is required. The first approval stores the script's SHA-256 hash under the current project. Unchanged scripts run without prompting; changed scripts show a diff against the last approved snapshot before they can run again.
 
 ### Commands: `ozm cmd`
 

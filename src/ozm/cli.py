@@ -154,9 +154,9 @@ TIPS = [
     "Do not create a script for one command. Run it directly with 'ozm cmd', "
     "'ozm gh', or 'ozm git'; use 'ozm bash --command' for shell syntax. 'ozm "
     "run' rejects scripts with only one executable line.",
-    "Batch your work: if you already know a sequence of two or more commands, "
-    "put them in a script with a shebang (e.g. #!/usr/bin/env bash) and run it "
-    "once with 'ozm run <script>'.",
+    "Batch real multi-step logic in a script with a shebang and run it once "
+    "with 'ozm run <script>'. Do not batch only ozm commands in a file or "
+    "generated shell snippet; invoke each ozm command directly and separately.",
     "Prefer read-only tools. Reach for rg, cat, nl, head, tail, ls, and git "
     "status/log/diff before anything that mutates files or state.",
     "Avoid complex commands. Keep each command simple and single-purpose; "

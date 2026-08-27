@@ -9,6 +9,7 @@ from click.testing import CliRunner
 
 from ozm import cmd as cmd_mod
 from ozm import run as run_mod
+from ozm import shell as shell_mod
 from ozm import storage as storage_mod
 from ozm.approve import ApprovalResult
 
@@ -178,6 +179,110 @@ class RunStatusResetTests(unittest.TestCase):
         self.assertEqual(captured["content"], expected_content)
         self.assertEqual(captured["mode"], 0o500)
         self.assertTrue(snapshot_removed)
+
+
+class DirectOzmScriptTests(unittest.TestCase):
+    def test_run_blocks_file_containing_only_ozm_commands(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            os.mkdir(".git")
+            with open("ozm-commands.sh", "w") as f:
+                f.write(
+                    "#!/usr/bin/env bash\n"
+                    "# Run these through ozm directly.\n"
+                    "\n"
+                    "ozm status\n"
+                    "ozm tips\n"
+                )
+            target = os.path.abspath("ozm-commands.sh")
+
+            with patch.object(run_mod, "load_hashes") as load_hashes, \
+                 patch.object(run_mod, "request_approval") as request_approval, \
+                 patch.object(run_mod, "_execute_script") as execute_script, \
+                 patch.object(run_mod, "audit_log") as audit_log:
+                result = runner.invoke(
+                    run_mod.run_cmd,
+                    [*META, "ozm-commands.sh"],
+                )
+
+        self.assertEqual(result.exit_code, run_mod.BLOCKED)
+        self.assertIn("only invoke ozm", result.output)
+        self.assertIn("one at a time", result.output)
+        self.assertIn("automatic approvals", result.output)
+        load_hashes.assert_not_called()
+        request_approval.assert_not_called()
+        execute_script.assert_not_called()
+        audit_log.assert_called_once_with(
+            "blocked",
+            "run",
+            target,
+            "run ozm commands directly instead of through a reviewed file",
+        )
+
+    def test_run_stdin_blocks_ozm_only_content(self):
+        with patch.object(run_mod, "load_hashes") as load_hashes, \
+             patch.object(run_mod, "request_approval") as request_approval, \
+             patch.object(run_mod, "audit_log"):
+            result = CliRunner().invoke(
+                run_mod.run_cmd,
+                ["--stdin", "--title", "ozm-only", *META],
+                input="#!/usr/bin/env bash\nozm status\nozm tips\n",
+            )
+
+        self.assertEqual(result.exit_code, run_mod.BLOCKED)
+        self.assertIn("only invoke ozm", result.output)
+        load_hashes.assert_not_called()
+        request_approval.assert_not_called()
+
+    def test_in_memory_shell_blocks_chained_ozm_commands(self):
+        with patch.object(run_mod, "load_hashes") as load_hashes, \
+             patch.object(run_mod, "request_approval") as request_approval, \
+             patch.object(run_mod, "audit_log"):
+            result = CliRunner().invoke(
+                shell_mod.shell_cmd,
+                ["--command", "ozm status && ozm tips", *META],
+            )
+
+        self.assertEqual(result.exit_code, run_mod.BLOCKED)
+        self.assertIn("only invoke ozm", result.output)
+        load_hashes.assert_not_called()
+        request_approval.assert_not_called()
+
+    def test_mixed_script_continues_to_normal_approval(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            os.mkdir(".git")
+            with open("mixed.sh", "w") as f:
+                f.write("#!/usr/bin/env bash\nozm status\nprintf done\n")
+
+            with patch.object(run_mod, "load_hashes", return_value={}), \
+                 patch.object(
+                     run_mod,
+                     "request_approval",
+                     return_value=ApprovalResult(approved=False),
+                 ) as request_approval, \
+                 patch.object(run_mod, "audit_log"):
+                result = runner.invoke(run_mod.run_cmd, [*META, "mixed.sh"])
+
+        self.assertEqual(result.exit_code, run_mod.DENIED)
+        request_approval.assert_called_once()
+
+    def test_ozm_prefix_requires_an_exact_command_token(self):
+        self.assertTrue(run_mod._all_ozm_invocations(["ozm status", "  ozm tips"]))
+        self.assertTrue(
+            run_mod._all_ozm_invocations(["ozm status && ozm tips"])
+        )
+        self.assertTrue(
+            run_mod._all_ozm_invocations([
+                "ozm bash --command 'printf one && printf two'"
+            ])
+        )
+        self.assertFalse(
+            run_mod._all_ozm_invocations(["ozm status && printf done"])
+        )
+        self.assertFalse(run_mod._all_ozm_invocations(["ozmosis status"]))
+        self.assertFalse(run_mod._all_ozm_invocations(["/tmp/ozm status"]))
+        self.assertFalse(run_mod._all_ozm_invocations([]))
 
 
 class OneCommandScriptTests(unittest.TestCase):

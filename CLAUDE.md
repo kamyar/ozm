@@ -6,7 +6,7 @@ All script execution and git operations must go through `ozm`.
 
 - **Always identify the agent work:** every `ozm run`, `ozm cmd`, `ozm gh`, and `ozm git` invocation must include `--agent-name "<what you are working on>"` and `--agent-description "<one-line intent>"`.
 - **Run scripts:** `ozm run --agent-name "<work>" --agent-description "<intent>" <script> [args...]` — never `python`, `bash`, `./`, or `uv run` directly
-- **Do not wrap one command in a script:** `ozm run` rejects scripts with only one executable line. Run the command directly with `ozm cmd`, `ozm gh`, or `ozm git`; use `ozm bash --command` for shell syntax.
+- **Do not wrap direct commands in a script:** `ozm run` rejects scripts with only one executable line. It also rejects disk or in-memory shell files when every command segment invokes `ozm`. Run each Ozm command directly and separately; use `ozm bash --command` only for shell logic that is not a sequence of Ozm commands.
 - **Do not chmod scripts for ozm:** `ozm run` executes a private executable snapshot. The source script only needs a shebang. Use `chmod` only when the source file mode itself must change.
 - **Run commands:** `ozm cmd --agent-name "<work>" --agent-description "<intent>" <command> [args...]` — for arbitrary commands (e.g. `ozm cmd --agent-name "Install deps" --agent-description "Install editable package dependencies." uv pip install -e .`)
 - **Run GitHub commands:** `ozm gh --agent-name "<work>" --agent-description "<intent>" <gh-args...>` — never use direct `gh` or `ozm cmd gh`; proven reads run directly, while writes and unknown operations keep normal approval checks
