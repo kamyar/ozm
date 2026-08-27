@@ -38,12 +38,10 @@ class GitHubCommandNudgeTests(unittest.TestCase):
             result = CliRunner().invoke(cmd_mod.cmd_cmd, [*META, *args])
 
         self.assertEqual(result.exit_code, cmd_mod.BLOCKED)
-        self.assertIn("must use 'ozm gh'", result.output)
-        self.assertIn(
-            "api -X POST "
-            "repos/doordash/pedregal/pulls/458415/comments/3867433262/replies",
-            result.output,
-        )
+        self.assertIn("raw review-reply POST is not allowed", result.output)
+        self.assertIn("pr review-reply", result.output)
+        self.assertIn("--repo doordash/pedregal", result.output)
+        self.assertIn("--comment-id 3867433262", result.output)
         is_blocked.assert_not_called()
         is_allowed.assert_not_called()
         load_hashes.assert_not_called()
@@ -53,7 +51,7 @@ class GitHubCommandNudgeTests(unittest.TestCase):
             "blocked",
             "cmd",
             shlex.join(args),
-            "use the native ozm gh command",
+            "raw review-reply POST must use pr review-reply",
         )
 
     def test_cmd_rejects_absolute_gh_path(self):

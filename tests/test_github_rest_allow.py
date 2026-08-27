@@ -160,13 +160,13 @@ class GitHubRESTReadAutoAllowTests(unittest.TestCase):
         run_command.assert_called_once_with(args)
         audit_log.assert_called_once_with(
             "semantic",
-            "cmd",
+            "gh",
             shlex.join(args),
             "github rest GET",
         )
         self.assertIn("allowed (github rest GET)", result.output)
 
-    def test_rest_write_still_requires_approval(self):
+    def test_supported_rest_write_is_blocked_with_typed_nudge(self):
         args = [
             "gh", "api", "-X", "POST",
             "repos/doordash/pedregal/pulls/123/comments/456/replies",
@@ -175,10 +175,11 @@ class GitHubRESTReadAutoAllowTests(unittest.TestCase):
 
         result, _blocked, _allowed, _load_hashes, request_approval, run_command, _audit_log = self.run_cmd(args)
 
-        self.assertNotEqual(result.exit_code, 0)
-        request_approval.assert_called_once()
+        self.assertEqual(result.exit_code, cmd_mod.BLOCKED)
+        request_approval.assert_not_called()
         run_command.assert_not_called()
-        self.assertIn("denied cmd", result.output)
+        self.assertIn("raw review-reply POST is not allowed", result.output)
+        self.assertIn("pr review-reply", result.output)
 
     def test_blocklist_wins_over_rest_get_auto_allow(self):
         args = ["gh", "api", "repos/doordash/pedregal/pulls/123/reviews"]
