@@ -76,11 +76,20 @@ class GlobalOutputFilterTests(unittest.TestCase):
         self.assertNotIn("remove", result.output)
         self.assertNotIn("keep second", result.output)
 
-    def test_global_grep_returns_one_when_no_line_matches(self):
+    def test_global_grep_preserves_success_when_no_line_matches(self):
         result = self.invoke_printf(["--grep", "missing"], ["present"])
 
-        self.assertEqual(result.exit_code, 1, result.output)
+        self.assertEqual(result.exit_code, 0, result.output)
         self.assertNotIn("present", result.output)
+
+    def test_global_grep_preserves_child_failure(self):
+        result = CliRunner().invoke(
+            cli_mod.cli,
+            ["--grep", "missing", "cmd", *META, "false"],
+            env={"OZM_SAFE_READONLY": "1"},
+        )
+
+        self.assertEqual(result.exit_code, 1, result.output)
 
     def test_global_grep_filters_git_stdout(self):
         with patch.object(git_mod, "_git_binary", return_value="/usr/bin/printf"):

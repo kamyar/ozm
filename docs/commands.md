@@ -77,7 +77,7 @@ ozm --grep "func previewOrderV2FacetSpecsForProjection" \
   show origin/main:path/to/config.go
 ```
 
-These options avoid in-memory shell approvals for pipelines such as `ozm git show ... | grep ... | head -n 20`. Literal grep matching is case-sensitive. Ozm applies `--grep` before `--head`, leaves stderr visible, and continues consuming stdout until the child finishes. If the child succeeds but grep finds no line, Ozm returns exit code 1. A head-only filter preserves the child exit code. Output filters do not change command policy, approval, or audit classification. Before opening an approval dialog, Ozm rejects generated `shell:` content that ends in supported `head`, `head -N`, `head -n N`, or `head --lines=N` forms and prints the equivalent root `--head N` nudge.
+These options avoid in-memory shell approvals for pipelines such as `ozm git show ... | grep ... | head -n 20`. Literal grep matching is case-sensitive. Ozm applies `--grep` before `--head`, leaves stderr visible, continues consuming stdout until the child finishes, and preserves the child exit code even when grep finds no line. Output filters do not change command policy, approval, or audit classification. Before opening an approval dialog, Ozm rejects generated `shell:` content that ends in supported `head`, `head -N`, `head -n N`, or `head --lines=N` forms and prints the equivalent root `--head N` nudge. It also nudges generated Ozm commands that end in `|| true`. Ozm blocks reviewed Ozm pipelines to `true` because `| true` discards stdout and can interrupt the upstream command.
 
 ---
 

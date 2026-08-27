@@ -229,18 +229,50 @@ def _executable_lines(content: str) -> list[str]:
     ]
 
 
+def _shell_tokens(line: str) -> list[str] | None:
+    lexer = shlex.shlex(line, posix=True, punctuation_chars=";&|")
+    lexer.whitespace_split = True
+    try:
+        return list(lexer)
+    except ValueError:
+        return None
+
+
+def _ozm_true_operator(lines: list[str]) -> str | None:
+    """Return pipe for any pipe to true, or fallback for final || true."""
+    fallback = False
+    for line in lines:
+        tokens = _shell_tokens(line)
+        if not tokens or os.path.basename(tokens[0]) != "ozm":
+            continue
+        for index in range(1, len(tokens)):
+            if (
+                tokens[index - 1] == "|"
+                and os.path.basename(tokens[index]) == "true"
+            ):
+                return "pipe"
+        if (
+            len(tokens) >= 3
+            and tokens[-2] == "||"
+            and os.path.basename(tokens[-1]) == "true"
+        ):
+            fallback = True
+    return "fallback" if fallback else None
+
+
 def _generated_head_pipeline_limit(lines: list[str]) -> int | None:
     """Return the final head limit for a simple Ozm pipeline, if present."""
     if len(lines) != 1:
         return None
-    lexer = shlex.shlex(lines[0], posix=True, punctuation_chars=";&|")
-    lexer.whitespace_split = True
-    try:
-        tokens = list(lexer)
-    except ValueError:
+    tokens = _shell_tokens(lines[0])
+    if not tokens or os.path.basename(tokens[0]) != "ozm":
         return None
-    if not tokens or tokens[0] != "ozm":
-        return None
+    if (
+        len(tokens) >= 3
+        and tokens[-2] == "||"
+        and os.path.basename(tokens[-1]) == "true"
+    ):
+        tokens = tokens[:-2]
     pipe_indexes = [index for index, token in enumerate(tokens) if token == "|"]
     if not pipe_indexes:
         return None
@@ -332,6 +364,16 @@ def _run_reviewed_script(
     current_hash = compute_content_hash(content)
     display_content = content.decode("utf-8", errors="replace")
     executable_lines = _executable_lines(display_content)
+    true_operator = _ozm_true_operator(executable_lines)
+    if true_operator == "pipe":
+        reason = "pipe to true discards output and can interrupt execution"
+        audit_log("blocked", "run", audit_target, reason)
+        _cleanup(cleanup_path)
+        raise click_error(
+            "Ozm pipelines ending in '| true' are not allowed. They discard "
+            "stdout and can interrupt the upstream command. Remove '| true'.",
+            BLOCKED,
+        )
     head_limit = (
         _generated_head_pipeline_limit(executable_lines)
         if key_target.startswith(SHELL_PREFIX)
@@ -344,7 +386,18 @@ def _run_reviewed_script(
         raise click_error(
             "generated shell pipelines ending in 'head' are not allowed. "
             f"Put '--head {head_limit}' before the Ozm command family instead. "
-            "Combine it with repeatable root '--grep TERM' options when needed.",
+            "Combine it with repeatable root '--grep TERM' options when needed. "
+            "Do not add '|| true'; output filters preserve the child exit code.",
+            BLOCKED,
+        )
+    if true_operator == "fallback" and key_target.startswith(SHELL_PREFIX):
+        reason = "run the Ozm command directly without fallback true"
+        audit_log("blocked", "run", audit_target, reason)
+        _cleanup(cleanup_path)
+        raise click_error(
+            "generated Ozm commands ending in '|| true' are not allowed. Run "
+            "the Ozm command directly without '|| true'. Output filters "
+            "preserve the child exit code, including empty grep results.",
             BLOCKED,
         )
     if _all_ozm_invocations(executable_lines):

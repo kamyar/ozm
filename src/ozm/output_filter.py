@@ -52,14 +52,12 @@ def run_with_output_filter(
         bufsize=1,
         **kwargs,
     )
-    matched = False
     emitted = 0
     try:
         if process.stdout is not None:
             for line in process.stdout:
                 if terms and not any(term in line for term in terms):
                     continue
-                matched = True
                 if head_lines is not None and emitted >= head_lines:
                     continue
                 sys.stdout.write(line)
@@ -71,7 +69,4 @@ def run_with_output_filter(
         process.wait()
         raise
 
-    # Match grep behavior when the child succeeded but no output line matched.
-    if returncode == 0 and terms and not matched:
-        returncode = 1
     return subprocess.CompletedProcess(argv, returncode)

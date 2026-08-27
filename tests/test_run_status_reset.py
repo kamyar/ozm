@@ -254,12 +254,17 @@ class DirectOzmScriptTests(unittest.TestCase):
              patch.object(run_mod, "audit_log") as audit_log:
             result = CliRunner().invoke(
                 shell_mod.shell_cmd,
-                ["--command", "ozm git show HEAD:file | head -n 25", *META],
+                [
+                    "--command",
+                    "ozm git show HEAD:file | head -n 25 || true",
+                    *META,
+                ],
             )
 
         self.assertEqual(result.exit_code, run_mod.BLOCKED)
         self.assertIn("--head 25", result.output)
         self.assertIn("before the Ozm command family", result.output)
+        self.assertIn("Do not add '|| true'", result.output)
         load_hashes.assert_not_called()
         request_approval.assert_not_called()
         audit_log.assert_called_once_with(
@@ -267,6 +272,79 @@ class DirectOzmScriptTests(unittest.TestCase):
             "run",
             "shell:shell-command",
             "use root --head instead of a generated shell pipeline",
+        )
+
+    def test_in_memory_shell_nudges_fallback_true(self):
+        with patch.object(run_mod, "load_hashes") as load_hashes, \
+             patch.object(run_mod, "request_approval") as request_approval, \
+             patch.object(run_mod, "audit_log") as audit_log:
+            result = CliRunner().invoke(
+                shell_mod.shell_cmd,
+                ["--command", "ozm --grep missing git status || true", *META],
+            )
+
+        self.assertEqual(result.exit_code, run_mod.BLOCKED)
+        self.assertIn("without '|| true'", result.output)
+        self.assertIn("empty grep results", result.output)
+        load_hashes.assert_not_called()
+        request_approval.assert_not_called()
+        audit_log.assert_called_once_with(
+            "blocked",
+            "run",
+            "shell:shell-command",
+            "run the Ozm command directly without fallback true",
+        )
+
+    def test_pipe_to_true_is_blocked(self):
+        with patch.object(run_mod, "load_hashes") as load_hashes, \
+             patch.object(run_mod, "request_approval") as request_approval, \
+             patch.object(run_mod, "audit_log") as audit_log:
+            result = CliRunner().invoke(
+                shell_mod.shell_cmd,
+                ["--command", "ozm git status | true", *META],
+            )
+
+        self.assertEqual(result.exit_code, run_mod.BLOCKED)
+        self.assertIn("discard stdout", result.output)
+        self.assertIn("interrupt the upstream command", result.output)
+        load_hashes.assert_not_called()
+        request_approval.assert_not_called()
+        audit_log.assert_called_once_with(
+            "blocked",
+            "run",
+            "shell:shell-command",
+            "pipe to true discards output and can interrupt execution",
+        )
+
+    def test_disk_script_pipe_to_true_is_blocked(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            os.mkdir(".git")
+            with open("discard.sh", "w") as f:
+                f.write(
+                    "#!/usr/bin/env bash\n"
+                    "ozm git status | true\n"
+                    "printf done\n"
+                )
+
+            with patch.object(run_mod, "load_hashes") as load_hashes, \
+                 patch.object(run_mod, "request_approval") as request_approval, \
+                 patch.object(run_mod, "audit_log"):
+                result = runner.invoke(
+                    run_mod.run_cmd,
+                    [*META, "discard.sh"],
+                )
+
+        self.assertEqual(result.exit_code, run_mod.BLOCKED)
+        self.assertIn("discard stdout", result.output)
+        load_hashes.assert_not_called()
+        request_approval.assert_not_called()
+
+    def test_true_operator_detection_ignores_quoted_text(self):
+        self.assertIsNone(
+            run_mod._ozm_true_operator([
+                "ozm cmd printf 'value | true || true'"
+            ])
         )
 
     def test_head_pipeline_nudge_ignores_quoted_pipe_text(self):

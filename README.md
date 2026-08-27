@@ -104,7 +104,7 @@ Put output options before the command family. Repeat `--grep TERM` to show stdou
 ozm --grep "projection" --grep "coverage" --head 20 git --agent-name "Inspect main" --agent-description "Find projection and coverage code on main." show origin/main:path/to/config.go
 ```
 
-The filters work with `ozm cmd`, `ozm gh`, `ozm git`, and `ozm run`. When combined, Ozm applies `--grep` before `--head`. Ozm leaves stderr unchanged and continues consuming stdout until the child finishes. A grep with no matches returns exit code 1. Use these options instead of creating a shell pipeline with `grep`, `rg`, or `head` only to filter output. Ozm rejects generated shell pipelines that end in a supported `head` form and prints the equivalent root `--head N` nudge before opening an approval dialog.
+The filters work with `ozm cmd`, `ozm gh`, `ozm git`, and `ozm run`. When combined, Ozm applies `--grep` before `--head`. Ozm leaves stderr unchanged, continues consuming stdout until the child finishes, and preserves the child exit code even when grep finds no line. Use these options instead of creating a shell pipeline with `grep`, `rg`, or `head` only to filter output. Ozm nudges generated commands that end in `|| true`, rejects generated shell pipelines that end in a supported `head` form, and blocks Ozm pipelines to `true` because they discard output and can interrupt execution.
 
 ### Commands: `ozm cmd`
 
