@@ -20,7 +20,13 @@ MAX_SUBJECT_LENGTH = 72
 MAX_MESSAGE_LENGTH = 500
 PROTECTED_BRANCHES = {"main", "master"}
 DANGEROUS_SUBCOMMANDS = {"filter-branch", "filter-repo"}
-ATTRIBUTION_PATTERN = re.compile(r"^Co-Authored-By:", re.IGNORECASE | re.MULTILINE)
+ATTRIBUTION_PATTERN = re.compile(
+    r"^(?:Co-Authored-By|Generated-by):",
+    re.IGNORECASE | re.MULTILINE,
+)
+PINNED_FORCE_LEASE = re.compile(
+    r"^--force-with-lease=([A-Za-z0-9._/-]+):([0-9a-fA-F]{40}|[0-9a-fA-F]{64})$"
+)
 MESSAGE_POLICY_ERROR = 'Commit messages must use a single-line -m "message"'
 MESSAGE_SOURCE_FLAGS = {
     "-F",
@@ -158,8 +164,8 @@ def validate_message(message: str) -> list[str]:
     return errors
 
 
-def _check_commit(args: list[str], global_args: list[str] | None = None) -> str | None:
-    """Return a violation string if blocked, None if ok."""
+def _check_commit_message(args: list[str]) -> str | None:
+    """Return a non-overridable commit-message policy violation."""
     messages, has_external_source = _collect_messages(args)
     errors = []
     message = messages[0] if len(messages) == 1 else None
@@ -174,11 +180,18 @@ def _check_commit(args: list[str], global_args: list[str] | None = None) -> str 
 
     combined_message = "\n\n".join(messages)
     if cfg.get("allow_attribution") is False and ATTRIBUTION_PATTERN.search(combined_message):
-        errors.append("Co-Authored-By attribution is not allowed in this project")
+        errors.append("commit attribution is not allowed in this project")
 
-    if errors:
-        return "; ".join(errors)
+    return "; ".join(errors) if errors else None
 
+
+def _check_commit(args: list[str], global_args: list[str] | None = None) -> str | None:
+    """Return a commit message or branch policy violation."""
+    message_violation = _check_commit_message(args)
+    if message_violation:
+        return message_violation
+
+    cfg = commit_config()
     branch = get_current_branch(global_args)
 
     if cfg.get("require_branch") and branch in PROTECTED_BRANCHES:
@@ -194,11 +207,38 @@ def _check_commit(args: list[str], global_args: list[str] | None = None) -> str 
     return None
 
 
-def _check_push(args: list[str], global_args: list[str] | None = None) -> str | None:
+def _force_push_present(args: list[str]) -> bool:
+    return any(
+        arg in {"-f", "--mirror"}
+        or arg.startswith("--force")
+        or (not arg.startswith("-") and arg.startswith("+"))
+        for arg in args
+    )
+
+
+def _pinned_force_lease(args: list[str]) -> str | None:
+    force_args = [
+        arg for arg in args
+        if arg in {"-f", "--mirror"}
+        or arg.startswith("--force")
+        or (not arg.startswith("-") and arg.startswith("+"))
+    ]
+    if len(force_args) != 1:
+        return None
+    match = PINNED_FORCE_LEASE.fullmatch(force_args[0])
+    return force_args[0] if match else None
+
+
+def _check_push(
+    args: list[str],
+    global_args: list[str] | None = None,
+    *,
+    allow_pinned_force: bool = False,
+) -> str | None:
     """Return a violation string if blocked, None if ok."""
-    force_flags = {"-f", "--mirror"}
-    if any(a in force_flags or a.startswith("--force") for a in args):
-        return "force push is not allowed"
+    if _force_push_present(args):
+        if not allow_pinned_force or _pinned_force_lease(args) is None:
+            return "force push is not allowed"
 
     branch = get_current_branch(global_args)
     if branch in PROTECTED_BRANCHES:
@@ -293,6 +333,13 @@ def _extract_reason(args: list[str]) -> tuple[list[str], str | None]:
     return cleaned, reason
 
 
+def _reject_non_overridable(violation: str, command: str) -> None:
+    audit_log("blocked", "git", command, violation)
+    click.echo(f"ozm: {violation}", err=True)
+    click.echo("ozm: this policy error cannot be overridden; fix the command and retry", err=True)
+    sys.exit(BLOCKED)
+
+
 def _handle_violation(
     violation: str,
     command: str,
@@ -368,16 +415,36 @@ def git_cmd(args: tuple[str, ...]) -> None:
                 _handle_violation(f"'git config {arg}' is not allowed", full_cmd, reason, agent)
 
     if subcmd == "commit":
+        full_cmd = _git_command([*global_args, subcmd, *rest])
+        message_violation = _check_commit_message(rest)
+        if message_violation:
+            _reject_non_overridable(message_violation, full_cmd)
         violation = _check_commit(rest, global_args)
         if violation:
-            full_cmd = _git_command([*global_args, subcmd, *rest])
             _handle_violation(violation, full_cmd, reason, agent)
 
     elif subcmd == "push":
-        violation = _check_push(rest, global_args)
-        if violation:
-            full_cmd = _git_command([*global_args, subcmd, *rest])
+        full_cmd = _git_command([*global_args, subcmd, *rest])
+        if _force_push_present(rest):
+            pinned_lease = _pinned_force_lease(rest)
+            if pinned_lease is None:
+                _reject_non_overridable(
+                    "force push requires --force-with-lease=REF:EXPECTED_SHA",
+                    full_cmd,
+                )
+            branch_violation = _check_push(
+                rest,
+                global_args,
+                allow_pinned_force=True,
+            )
+            violation = "pinned force push requires a one-time override"
+            if branch_violation:
+                violation = f"{violation}; {branch_violation}"
             _handle_violation(violation, full_cmd, reason, agent)
+        else:
+            violation = _check_push(rest, global_args)
+            if violation:
+                _handle_violation(violation, full_cmd, reason, agent)
 
     result = _run_git([_git_binary(), *global_args, subcmd, *rest])
     sys.exit(result.returncode)

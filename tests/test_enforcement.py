@@ -207,14 +207,14 @@ class GitTests(unittest.TestCase):
         with patch.object(git_mod, "get_current_branch", return_value="kamyar/topic"):
             self.assertEqual(
                 git_mod._check_push(["origin", "+main"]),
-                "pushing to 'main' is not allowed",
+                "force push is not allowed",
             )
 
     def test_push_blocks_plus_prefixed_ref(self):
         with patch.object(git_mod, "get_current_branch", return_value="kamyar/topic"):
             self.assertEqual(
                 git_mod._check_push(["origin", "+refs/heads/master"]),
-                "pushing to 'master' is not allowed",
+                "force push is not allowed",
             )
 
 
