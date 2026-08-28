@@ -166,6 +166,23 @@ class GitHubRESTReadAutoAllowTests(unittest.TestCase):
         )
         self.assertIn("allowed (github rest GET)", result.output)
 
+    def test_api_help_runs_without_approval_or_cache(self):
+        args = ["gh", "api", "--help"]
+
+        result, _blocked, is_allowed, load_hashes, request_approval, run_command, audit_log = self.run_cmd(args)
+
+        self.assertEqual(result.exit_code, 0, result.output)
+        is_allowed.assert_not_called()
+        load_hashes.assert_not_called()
+        request_approval.assert_not_called()
+        run_command.assert_called_once_with(args)
+        audit_log.assert_called_once_with(
+            "semantic",
+            "gh",
+            shlex.join(args),
+            "github api help",
+        )
+
     def test_supported_rest_write_is_blocked_with_typed_nudge(self):
         args = [
             "gh", "api", "-X", "POST",

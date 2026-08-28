@@ -8,7 +8,11 @@ from ozm.cmd import _cmd_impl
 
 @click.command(
     "gh",
-    context_settings={"ignore_unknown_options": True, "allow_extra_args": True},
+    context_settings={
+        "ignore_unknown_options": True,
+        "allow_extra_args": True,
+        "allow_interspersed_args": False,
+    },
 )
 @click.argument("items", nargs=-1, type=click.UNPROCESSED, required=True)
 def gh_cmd(items: tuple[str, ...]) -> None:

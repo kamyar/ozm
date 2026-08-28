@@ -103,6 +103,8 @@ $ ozm cmd --agent-name "Check API health" --agent-description "Call the service 
 $ ozm cmd --agent-name "Start services" --agent-description "Bring the local Docker stack up." docker compose up -d
 ```
 
+**Built-in semantic reads:** Exact conservative forms of `command -v`, `bazel query`, `brew search`, `npm view`, and `npm list` run before allowlist, cache, and approval checks. `bazel query --output_file` and unknown or write-capable forms are not semantic reads. `gh api --help` is also a local semantic read.
+
 **Script detection:** If ozm detects you're trying to run a script file (e.g. `ozm cmd python script.py`), it will suggest using `ozm run` instead and exit. This ensures scripts go through content review.
 
 ```

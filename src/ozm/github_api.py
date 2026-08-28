@@ -74,6 +74,8 @@ class GitHubRESTRequest:
 
 def read_only_reason(args: list[str]) -> str | None:
     """Return an allow reason for a proven read-only GitHub operation."""
+    if args in (["gh", "api", "--help"], ["gh", "api", "-h"]):
+        return "github api help"
     high_level_reason = high_level_read_only_reason(args)
     if high_level_reason:
         return high_level_reason
