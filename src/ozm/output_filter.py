@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from collections import deque
 import subprocess
 import sys
 from typing import Any
@@ -28,8 +29,20 @@ def current_head_lines() -> int | None:
     return context.find_root().params.get("head_lines")
 
 
+def current_tail_lines() -> int | None:
+    """Return the root-level trailing stdout line limit."""
+    context = click.get_current_context(silent=True)
+    if context is None:
+        return None
+    return context.find_root().params.get("tail_lines")
+
+
 def output_filter_active() -> bool:
-    return bool(current_grep_terms()) or current_head_lines() is not None
+    return (
+        bool(current_grep_terms())
+        or current_head_lines() is not None
+        or current_tail_lines() is not None
+    )
 
 
 def run_with_output_filter(
@@ -39,7 +52,8 @@ def run_with_output_filter(
     """Run argv and apply root-level grep and head filters to stdout."""
     terms = current_grep_terms()
     head_lines = current_head_lines()
-    if not terms and head_lines is None:
+    tail_lines = current_tail_lines()
+    if not terms and head_lines is None and tail_lines is None:
         return subprocess.run(argv, **kwargs)
     if "stdout" in kwargs or "capture_output" in kwargs:
         raise ValueError("stdout filtering cannot be combined with captured output")
@@ -53,10 +67,14 @@ def run_with_output_filter(
         **kwargs,
     )
     emitted = 0
+    tail_buffer = deque(maxlen=tail_lines) if tail_lines is not None else None
     try:
         if process.stdout is not None:
             for line in process.stdout:
                 if terms and not any(term in line for term in terms):
+                    continue
+                if tail_buffer is not None:
+                    tail_buffer.append(line)
                     continue
                 if head_lines is not None and emitted >= head_lines:
                     continue
@@ -64,6 +82,10 @@ def run_with_output_filter(
                 sys.stdout.flush()
                 emitted += 1
         returncode = process.wait()
+        if tail_buffer is not None:
+            for line in tail_buffer:
+                sys.stdout.write(line)
+            sys.stdout.flush()
     except BaseException:
         process.terminate()
         process.wait()

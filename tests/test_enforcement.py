@@ -221,7 +221,7 @@ class InstallHookTests(unittest.TestCase):
 
     def test_hook_accepts_global_grep_with_agent_metadata(self):
         result = self.run_hook(
-            'ozm --grep "needle" --head 20 git --agent-name "Search history" '
+            'ozm --cwd /tmp --grep "needle" --tail 20 git --agent-name "Search history" '
             '--agent-description "Find a term in historical output." show HEAD:file'
         )
 

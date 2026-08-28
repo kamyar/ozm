@@ -96,15 +96,15 @@ ozm run --agent-name "Run tests" --agent-description "Execute the reviewed test 
 
 Scripts must have a shebang, but the source file does not need an executable file mode. Do not run `chmod +x` before `ozm run`; ozm executes the reviewed content from a private, user-executable snapshot. Ozm rejects scripts with only one executable line before cache or approval checks. It also rejects disk, stdin, and generated in-memory shell files when every command segment is an `ozm` invocation. Run those Ozm commands directly and one at a time so normal automatic approvals can apply. Run other single commands directly with `ozm cmd`, `ozm gh`, or `ozm git`; use `ozm bash --command` when shell syntax is required. The first approval stores the script's SHA-256 hash under the current project. Unchanged scripts run without prompting; changed scripts show a diff against the last approved snapshot before they can run again.
 
-### Shell-free output filtering: `ozm --grep` and `ozm --head`
+### Shell-free location and output controls
 
-Put output options before the command family. Repeat `--grep TERM` to show stdout lines that contain any selected literal term. Use `--head N` to show at most N lines:
+Put root options before the command family. Use `--cwd DIRECTORY` instead of a shell `cd` wrapper. Repeat `--grep TERM` to show stdout lines that contain any selected literal term. Use `--head N` or `--tail N` to select leading or trailing filtered lines:
 
 ```bash
-ozm --grep "projection" --grep "coverage" --head 20 git --agent-name "Inspect main" --agent-description "Find projection and coverage code on main." show origin/main:path/to/config.go
+ozm --cwd /path/to/worktree --grep "projection" --grep "coverage" --head 20 git --agent-name "Inspect main" --agent-description "Find projection and coverage code on main." show origin/main:path/to/config.go
 ```
 
-The filters work with `ozm cmd`, `ozm gh`, `ozm git`, and `ozm run`. When combined, Ozm applies `--grep` before `--head`. Ozm leaves stderr unchanged, continues consuming stdout until the child finishes, and preserves the child exit code even when grep finds no line. Use these options instead of creating a shell pipeline with `grep`, `rg`, or `head` only to filter output. Ozm nudges generated commands that end in `|| true`, rejects raw or Ozm shell pipelines that end in a supported `head` form, and blocks Ozm pipelines to `true` because they discard output and can interrupt execution. Generated wrappers made only of separate simple commands must run each command directly. Generated wrappers must not invoke or source mutable scripts because the dialog would review the wrapper instead of the target script content.
+The controls work with `ozm cmd`, `ozm gh`, `ozm git`, and `ozm run`. Ozm applies `--cwd` before project policy. It applies `--grep` before `--head` or `--tail`. Ozm leaves stderr unchanged, continues consuming stdout until the child finishes, and preserves the child exit code even when grep finds no line. Use these options instead of creating a shell pipeline with `grep`, `rg`, `head`, or `tail` only to filter output. Ozm nudges generated commands that end in `|| true`, rejects raw or Ozm shell pipelines that end in a supported `head` form, and blocks Ozm pipelines to `true` because they discard output and can interrupt execution. Generated wrappers made only of separate simple commands must run each command directly. Generated wrappers must not invoke or source mutable scripts because the dialog would review the wrapper instead of the target script content.
 
 ### Commands: `ozm cmd`
 

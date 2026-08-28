@@ -260,6 +260,29 @@ def _ozm_true_operator(lines: list[str]) -> str | None:
     return "fallback" if fallback else None
 
 
+def _generated_leading_cwd(lines: list[str]) -> tuple[str, str] | None:
+    """Return a leading cd path and suggested Ozm family."""
+    if not lines:
+        return None
+    tokens = _shell_tokens(lines[0])
+    if not tokens or tokens[0] != "cd" or len(tokens) < 2 or "$" in tokens[1]:
+        return None
+    path = tokens[1]
+    remainder = []
+    if len(tokens) >= 4 and tokens[2] == "&&":
+        remainder = tokens[3:]
+    elif len(tokens) == 2 and len(lines) > 1:
+        remainder = _shell_tokens(lines[1]) or []
+    if not remainder:
+        return None
+    if _segment_invokes_script(remainder):
+        family = "run"
+    else:
+        first = os.path.basename(remainder[0])
+        family = first if first in ("git", "gh") else "ozm" if first == "ozm" else "cmd"
+    return path, family
+
+
 def _generated_script_wrapper(lines: list[str]) -> bool:
     """Return true when generated shell content invokes mutable script content."""
     for line in lines:
@@ -441,14 +464,33 @@ def _run_reviewed_script(
     display_content = content.decode("utf-8", errors="replace")
     executable_lines = _executable_lines(display_content)
     generated_shell = key_target.startswith(SHELL_PREFIX)
+    leading_cwd = _generated_leading_cwd(executable_lines) if generated_shell else None
     if generated_shell and _generated_script_wrapper(executable_lines):
         reason = "review invoked script content with ozm run"
         audit_log("blocked", "run", audit_target, reason)
         _cleanup(cleanup_path)
+        cwd_hint = ""
+        if leading_cwd is not None:
+            cwd_hint = f" Use root '--cwd {shlex.quote(leading_cwd[0])}' when needed."
         raise click_error(
             "generated shell wrappers must not invoke or source mutable script "
             "content. The dialog would review only the wrapper. Run the target "
-            "script through 'ozm run' so Ozm reviews its content.",
+            f"script through 'ozm run' so Ozm reviews its content.{cwd_hint}",
+            BLOCKED,
+        )
+    if leading_cwd is not None:
+        path, family = leading_cwd
+        reason = "use root --cwd instead of a generated cd wrapper"
+        audit_log("blocked", "run", audit_target, reason)
+        _cleanup(cleanup_path)
+        quoted_path = shlex.quote(path)
+        if family == "ozm":
+            suggestion = f"Put '--cwd {quoted_path}' before the Ozm command family."
+        else:
+            suggestion = f"Use 'ozm --cwd {quoted_path} {family} ...' instead."
+        raise click_error(
+            "generated shell wrappers that start with 'cd' are not allowed. "
+            f"{suggestion}",
             BLOCKED,
         )
     true_operator = _ozm_true_operator(executable_lines)
