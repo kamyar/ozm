@@ -266,33 +266,52 @@ def _detect_inline_code(args: tuple[str, ...]) -> str | None:
     return None
 
 
-def _find_script_in_args(args: tuple[str, ...]) -> tuple[str, str] | None:
-    """Return (script_path, suggested_shebang) if args look like script execution."""
+def _script_shebang(path: str, interpreter: str | None = None) -> str | None:
+    if not os.path.isfile(path):
+        return None
+    if interpreter is not None:
+        return f"#!/usr/bin/env {interpreter}"
+    _, ext = os.path.splitext(path)
+    inferred = EXTENSION_SHEBANGS.get(ext.lower())
+    if inferred:
+        return inferred
+    try:
+        with open(path, "rb") as file:
+            first_line = file.readline(256).decode("utf-8", errors="replace").strip()
+    except OSError:
+        return None
+    return first_line if first_line.startswith("#!") else None
+
+
+def _find_script_in_args(
+    args: tuple[str, ...],
+) -> tuple[str, str, tuple[str, ...]] | None:
+    """Return the script, suggested shebang, and script arguments."""
     interpreter = None
     saw_wrapper = False
-    for arg in args:
+    for index, arg in enumerate(args):
         if arg.startswith("-"):
             if interpreter and arg == "-m":
                 return None
             continue
-        if arg in WRAPPERS:
+        if arg in WRAPPERS and interpreter is None:
             saw_wrapper = True
             continue
-        _, ext = os.path.splitext(arg)
-        if ext and os.path.isfile(arg):
-            if interpreter:
-                shebang = f"#!/usr/bin/env {interpreter}"
-                return arg, shebang
-            inferred = EXTENSION_SHEBANGS.get(ext)
-            if saw_wrapper and inferred:
-                return arg, inferred
-        if not interpreter and "/" not in arg and arg in INTERPRETERS:
-            interpreter = arg
+        basename = os.path.basename(arg)
+        if interpreter is None and basename in INTERPRETERS:
+            interpreter = basename
             continue
+        if interpreter is not None:
+            shebang = _script_shebang(arg, interpreter)
+            if shebang:
+                return arg, shebang, args[index + 1:]
+            return None
+        shebang = _script_shebang(arg)
+        if shebang and (index == 0 or saw_wrapper):
+            return arg, shebang, args[index + 1:]
         # Non-wrapper, non-interpreter, non-script token (e.g. "pytest") —
         # everything after this is arguments to that command, not scripts.
-        if not interpreter:
-            return None
+        return None
     return None
 
 
@@ -405,12 +424,26 @@ def _cmd_impl(
 
     match = _find_script_in_args(tuple(args))
     if match:
-        script, shebang = match
+        script, shebang, script_args = match
+        suggestion = shlex.join([
+            "ozm",
+            "run",
+            "--agent-name",
+            agent.name,
+            "--agent-description",
+            agent.description,
+            script,
+            *script_args,
+        ])
+        audit_log(
+            "blocked",
+            "cmd",
+            shlex.join(args),
+            "script content must use ozm run",
+        )
         click.echo(
-            "ozm: use "
-            f"'ozm run --agent-name \"{agent.name}\" "
-            f"--agent-description \"{agent.description}\" {script}' instead — "
-            f"make sure the script has a shebang ({shebang})",
+            f"ozm: use '{suggestion}' instead — make sure the script has a "
+            f"shebang ({shebang})",
             err=True,
         )
         sys.exit(BLOCKED)
