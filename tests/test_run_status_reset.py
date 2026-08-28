@@ -404,6 +404,26 @@ class DirectOzmScriptTests(unittest.TestCase):
             "run simple generated commands directly and separately",
         )
 
+    def test_generated_leading_cd_nudges_root_cwd(self):
+        with patch.object(run_mod, "load_hashes") as load_hashes, \
+             patch.object(run_mod, "request_approval") as request_approval, \
+             patch.object(run_mod, "audit_log") as audit_log:
+            result = CliRunner().invoke(
+                shell_mod.shell_cmd,
+                ["--command", "cd /tmp/worktree && git status", *META],
+            )
+
+        self.assertEqual(result.exit_code, run_mod.BLOCKED)
+        self.assertIn("ozm --cwd /tmp/worktree git", result.output)
+        load_hashes.assert_not_called()
+        request_approval.assert_not_called()
+        audit_log.assert_called_once_with(
+            "blocked",
+            "run",
+            "shell:shell-command",
+            "use root --cwd instead of a generated cd wrapper",
+        )
+
     def test_generated_script_wrapper_nudges_ozm_run(self):
         cases = [
             "cd /tmp && bash tools/githooks/install.sh",
@@ -423,6 +443,8 @@ class DirectOzmScriptTests(unittest.TestCase):
             self.assertEqual(result.exit_code, run_mod.BLOCKED)
             self.assertIn("review only the wrapper", result.output)
             self.assertIn("ozm run", result.output)
+            if command.startswith("cd "):
+                self.assertIn("--cwd /tmp", result.output)
             load_hashes.assert_not_called()
             request_approval.assert_not_called()
 

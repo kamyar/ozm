@@ -37,6 +37,18 @@ def _get_version() -> str:
 
 @click.group()
 @click.option(
+    "--cwd",
+    type=click.Path(exists=True, file_okay=False, resolve_path=True),
+    help="Run the selected command from this directory.",
+)
+@click.option(
+    "--tail",
+    "tail_lines",
+    type=click.IntRange(min=1),
+    metavar="N",
+    help="Show the last N filtered stdout lines.",
+)
+@click.option(
     "--head",
     "head_lines",
     type=click.IntRange(min=1),
@@ -51,10 +63,23 @@ def _get_version() -> str:
     help="Show stdout lines containing TERM. Repeat for OR matching.",
 )
 @click.version_option(version=_get_version(), prog_name="ozm")
-def cli(grep_terms: tuple[str, ...], head_lines: int | None):
+@click.pass_context
+def cli(
+    context: click.Context,
+    grep_terms: tuple[str, ...],
+    head_lines: int | None,
+    tail_lines: int | None,
+    cwd: str | None,
+):
     """Content-aware script execution gate and git rule enforcer."""
     if any(term == "" for term in grep_terms):
         raise click.BadParameter("must not be empty", param_hint="--grep")
+    if head_lines is not None and tail_lines is not None:
+        raise click.UsageError("use only one of --head or --tail")
+    if cwd is not None:
+        original_cwd = os.getcwd()
+        os.chdir(cwd)
+        context.call_on_close(lambda: os.chdir(original_cwd))
 
 
 @click.command("version")

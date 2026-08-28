@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 
 import os
+import subprocess
 import unittest
 from unittest.mock import patch
 
 from click.testing import CliRunner
 
 from ozm import cli as cli_mod
+from ozm import cmd as cmd_mod
 from ozm import git as git_mod
 from ozm import run as run_mod
 from ozm.approve import ApprovalResult
@@ -75,6 +77,28 @@ class GlobalOutputFilterTests(unittest.TestCase):
         self.assertIn("keep first", result.output)
         self.assertNotIn("remove", result.output)
         self.assertNotIn("keep second", result.output)
+
+    def test_global_tail_limits_stdout_lines(self):
+        result = self.invoke_printf(
+            ["--tail", "2"],
+            ["first", "second", "third"],
+        )
+
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertNotIn("first", result.output)
+        self.assertIn("second", result.output)
+        self.assertIn("third", result.output)
+
+    def test_global_grep_runs_before_global_tail(self):
+        result = self.invoke_printf(
+            ["--grep", "keep", "--tail", "1"],
+            ["keep first", "remove", "keep second"],
+        )
+
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertNotIn("keep first", result.output)
+        self.assertNotIn("remove", result.output)
+        self.assertIn("keep second", result.output)
 
     def test_global_grep_preserves_success_when_no_line_matches(self):
         result = self.invoke_printf(["--grep", "missing"], ["present"])
@@ -163,6 +187,32 @@ class GlobalOutputFilterTests(unittest.TestCase):
         self.assertNotIn("second", result.output)
         self.assertTrue(completed)
 
+    def test_global_cwd_applies_to_command_and_restores_caller(self):
+        runner = CliRunner()
+        original_cwd = os.getcwd()
+        with runner.isolated_filesystem():
+            os.mkdir("child")
+            child = os.path.abspath("child")
+            seen_cwd = None
+
+            def capture_cwd(argv):
+                nonlocal seen_cwd
+                seen_cwd = os.getcwd()
+                return subprocess.CompletedProcess(argv, 0)
+
+            with patch.object(cmd_mod.subprocess, "run", side_effect=capture_cwd):
+                result = runner.invoke(
+                    cli_mod.cli,
+                    ["--cwd", child, "cmd", *META, "pwd"],
+                    env={"OZM_SAFE_READONLY": "1"},
+                )
+            restored_cwd = os.getcwd()
+
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertEqual(seen_cwd, child)
+        self.assertNotEqual(restored_cwd, child)
+        self.assertEqual(os.getcwd(), original_cwd)
+
     def test_global_grep_rejects_an_empty_term(self):
         result = CliRunner().invoke(
             cli_mod.cli,
@@ -172,6 +222,15 @@ class GlobalOutputFilterTests(unittest.TestCase):
         self.assertEqual(result.exit_code, 2, result.output)
         self.assertIn("--grep", result.output)
         self.assertIn("must not be empty", result.output)
+
+    def test_global_head_and_tail_are_incompatible(self):
+        result = CliRunner().invoke(
+            cli_mod.cli,
+            ["--head", "1", "--tail", "1", "version"],
+        )
+
+        self.assertEqual(result.exit_code, 2, result.output)
+        self.assertIn("use only one of --head or --tail", result.output)
 
     def test_global_head_rejects_zero(self):
         result = CliRunner().invoke(
@@ -191,6 +250,9 @@ class GlobalOutputFilterTests(unittest.TestCase):
         self.assertIn("Repeat for OR matching", result.output)
         self.assertIn("--head N", result.output)
         self.assertIn("at most N", result.output)
+        self.assertIn("--tail N", result.output)
+        self.assertIn("last N", result.output)
+        self.assertIn("--cwd DIRECTORY", result.output)
 
 
 if __name__ == "__main__":

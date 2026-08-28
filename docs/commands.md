@@ -64,12 +64,13 @@ flowchart TD
 
 ---
 
-## `ozm --grep TERM` and `ozm --head N` — Shell-Free Output Filtering
+## Root `--cwd`, `--grep`, `--head`, and `--tail` Controls
 
-Put output options before `cmd`, `gh`, `git`, or `run`. Use `--grep TERM` to show stdout lines that contain a literal term. Repeat it to match any term. Use `--head N` to show at most N filtered lines:
+Put root controls before `cmd`, `gh`, `git`, or `run`. Use `--cwd DIRECTORY` instead of `cd DIRECTORY && ...`. Use `--grep TERM` to show stdout lines that contain a literal term. Repeat it to match any term. Use `--head N` or `--tail N` to show leading or trailing filtered lines:
 
 ```bash
-ozm --grep "func previewOrderV2FacetSpecsForProjection" \
+ozm --cwd /path/to/worktree \
+  --grep "func previewOrderV2FacetSpecsForProjection" \
   --grep "coverageUnresolvedSelectionSource" \
   --head 20 \
   git --agent-name "Inspect preview order" \
@@ -77,7 +78,7 @@ ozm --grep "func previewOrderV2FacetSpecsForProjection" \
   show origin/main:path/to/config.go
 ```
 
-These options avoid in-memory shell approvals for pipelines such as `ozm git show ... | grep ... | head -n 20`. Literal grep matching is case-sensitive. Ozm applies `--grep` before `--head`, leaves stderr visible, continues consuming stdout until the child finishes, and preserves the child exit code even when grep finds no line. Output filters do not change command policy, approval, or audit classification. Before opening an approval dialog, Ozm rejects generated `shell:` content that ends in supported `head`, `head -N`, `head -n N`, or `head --lines=N` forms and prints the equivalent root `--head N` nudge. It also nudges generated Ozm commands that end in `|| true`. Ozm blocks reviewed Ozm pipelines to `true` because `| true` discards stdout and can interrupt the upstream command. Raw generated pipelines such as `rg ... | head` receive the same root `--head` nudge. Generated simple command chains must run directly and separately. Generated shell content cannot invoke or source a mutable script; use `ozm run` so Ozm reviews the target content.
+These options avoid in-memory shell approvals for pipelines such as `ozm git show ... | grep ... | head -n 20`. Literal grep matching is case-sensitive. Ozm applies `--cwd` before it loads project policy. It applies `--grep` before `--head` or `--tail`, leaves stderr visible, continues consuming stdout until the child finishes, and preserves the child exit code even when grep finds no line. Output filters do not change command policy, approval, or audit classification. Before opening an approval dialog, Ozm rejects generated `shell:` content that ends in supported `head`, `head -N`, `head -n N`, or `head --lines=N` forms and prints the equivalent root `--head N` nudge. It also nudges generated Ozm commands that end in `|| true`. Ozm blocks reviewed Ozm pipelines to `true` because `| true` discards stdout and can interrupt the upstream command. Raw generated pipelines such as `rg ... | head` receive the same root `--head` nudge. Generated simple command chains must run directly and separately. Generated wrappers that start with `cd` receive a root `--cwd` nudge. Generated shell content cannot invoke or source a mutable script; use `ozm run` so Ozm reviews the target content.
 
 ---
 
