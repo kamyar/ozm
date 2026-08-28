@@ -5,8 +5,10 @@ import hashlib
 import os
 import re
 import shlex
+import shutil
 import subprocess
 import sys
+import tempfile
 import time
 
 import click
@@ -117,6 +119,46 @@ def _safe_read_only_reason(command: str) -> str | None:
     if name in SAFE_READ_ONLY_COMMANDS:
         return f"read-only {name}"
     return None
+
+
+def _bare_env_dump(args: list[str]) -> bool:
+    return (
+        bool(args)
+        and os.path.basename(args[0]) == "env"
+        and not any(arg in ("--help", "--version") for arg in args[1:])
+        and _command_start_index(args) is None
+    )
+
+
+def _temporary_executable(args: list[str]) -> tuple[str, str] | None:
+    index = _command_start_index(args)
+    if index is None:
+        return None
+    token = args[index]
+    candidate = (
+        shutil.which(token)
+        if os.path.sep not in token
+        else os.path.abspath(token)
+    )
+    if not candidate or not os.path.isfile(candidate) or not os.access(candidate, os.X_OK):
+        return None
+    real_candidate = os.path.realpath(candidate)
+    roots = {
+        os.path.realpath("/tmp"),
+        os.path.realpath("/var/tmp"),
+        os.path.realpath(tempfile.gettempdir()),
+    }
+    if not any(
+        os.path.commonpath([root, real_candidate]) == root
+        for root in roots
+    ):
+        return None
+    try:
+        with open(real_candidate, "rb") as file:
+            digest = hashlib.sha256(file.read()).hexdigest()
+    except OSError:
+        return None
+    return real_candidate, digest
 
 
 def _edited_argv(command: str) -> list[str]:
@@ -429,6 +471,17 @@ def _cmd_impl(
     else:
         _reject_gh_via_cmd(args, agent)
 
+    if _bare_env_dump(args):
+        command = shlex.join(args)
+        audit_log("blocked", "cmd", command, "bare env can expose secrets")
+        click.echo(
+            "ozm: bare 'env' output is not allowed because it can expose "
+            "credentials and tokens. Inspect only a named variable with a "
+            "purpose-specific command.",
+            err=True,
+        )
+        sys.exit(BLOCKED)
+
     inline = _detect_inline_code(tuple(args))
     if inline:
         shebang = f"#!/usr/bin/env {inline}"
@@ -466,6 +519,51 @@ def _cmd_impl(
             err=True,
         )
         sys.exit(BLOCKED)
+
+    temporary = _temporary_executable(args)
+    if temporary is not None:
+        path, digest = temporary
+        command = shlex.join(args)
+        violation = f"temporary executable {path} (sha256:{digest})"
+        if not reason:
+            audit_log("blocked", "cmd", command, violation)
+            click.echo(
+                f"ozm: blocked temporary executable: {path}",
+                err=True,
+            )
+            click.echo(f"ozm: reviewed digest: sha256:{digest}", err=True)
+            click.echo(
+                "ozm: install it in a trusted location, or use --reason with "
+                "its provenance and checksum for a one-time override",
+                err=True,
+            )
+            sys.exit(BLOCKED)
+        approval = request_override(command, violation, reason, agent)
+        if approval.approved is True:
+            if _temporary_executable(args) != temporary:
+                audit_log(
+                    "blocked",
+                    "cmd",
+                    command,
+                    "temporary executable changed after approval",
+                )
+                raise click_error(
+                    "temporary executable changed after approval and was not run",
+                    BLOCKED,
+                )
+            audit_log("override", "cmd", command, approval.feedback)
+            click.echo("ozm: temporary executable override granted (one-time)", err=True)
+            result = _run_command(args)
+            sys.exit(result.returncode)
+        if approval.approved is False:
+            audit_log("denied", "cmd", command, approval.feedback)
+            click.echo("ozm: temporary executable override denied", err=True)
+            sys.exit(DENIED)
+        audit_log("no-dialog", "cmd", command, approval.feedback)
+        raise click_error(
+            "temporary executable approval dialog could not be displayed",
+            NO_DIALOG,
+        )
 
     if args and args[0] == "git":
         click.echo(

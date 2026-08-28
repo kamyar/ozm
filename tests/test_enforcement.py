@@ -103,6 +103,96 @@ class CmdTests(unittest.TestCase):
         subprocess_mod.run.assert_called_once_with(["rm", "-rf", "build"])
         request_cmd_approval.assert_not_called()
 
+    def test_cmd_blocks_bare_env_before_policy(self):
+        with patch.object(cmd_mod, "is_command_blocked") as is_blocked, \
+             patch.object(cmd_mod, "is_command_allowed") as is_allowed, \
+             patch.object(cmd_mod, "load_hashes") as load_hashes, \
+             patch.object(cmd_mod, "request_cmd_approval") as request_approval, \
+             patch.object(cmd_mod, "audit_log"):
+            result = CliRunner().invoke(cmd_mod.cmd_cmd, [*META, "env"])
+
+        self.assertEqual(result.exit_code, cmd_mod.BLOCKED)
+        self.assertIn("expose credentials and tokens", result.output)
+        is_blocked.assert_not_called()
+        is_allowed.assert_not_called()
+        load_hashes.assert_not_called()
+        request_approval.assert_not_called()
+
+    def test_env_with_a_child_command_is_not_a_bare_dump(self):
+        self.assertFalse(cmd_mod._bare_env_dump(["env", "LC_ALL=C", "printf", "ok"]))
+        self.assertTrue(cmd_mod._bare_env_dump(["env", "-u", "TOKEN"]))
+        self.assertFalse(cmd_mod._bare_env_dump(["env", "--help"]))
+
+    def test_cmd_blocks_temporary_executable_before_config_or_cache(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            path = os.path.abspath("temporary-binary")
+            with open(path, "wb") as f:
+                f.write(b"binary content")
+            os.chmod(path, 0o700)
+            with patch.object(cmd_mod.tempfile, "gettempdir", return_value=os.getcwd()), \
+                 patch.object(cmd_mod, "is_command_blocked") as is_blocked, \
+                 patch.object(cmd_mod, "is_command_allowed") as is_allowed, \
+                 patch.object(cmd_mod, "load_hashes") as load_hashes, \
+                 patch.object(cmd_mod, "request_cmd_approval") as request_approval, \
+                 patch.object(cmd_mod, "audit_log"):
+                result = runner.invoke(cmd_mod.cmd_cmd, [*META, path])
+
+        self.assertEqual(result.exit_code, cmd_mod.BLOCKED)
+        self.assertIn("temporary executable", result.output)
+        self.assertIn("sha256:", result.output)
+        is_blocked.assert_not_called()
+        is_allowed.assert_not_called()
+        load_hashes.assert_not_called()
+        request_approval.assert_not_called()
+
+    def test_temporary_executable_override_runs_once(self):
+        path = "/tmp/ozm-test-temporary-binary"
+        temporary = (path, "a" * 64)
+        completed = subprocess.CompletedProcess([path], 0)
+        with patch.object(
+                 cmd_mod,
+                 "_temporary_executable",
+                 side_effect=[temporary, temporary],
+             ), patch.object(
+                 cmd_mod,
+                 "request_override",
+                 return_value=ApprovalResult(approved=True),
+             ) as request_override, patch.object(
+                 cmd_mod,
+                 "_run_command",
+                 return_value=completed,
+             ) as run_command, patch.object(cmd_mod, "audit_log"):
+            result = CliRunner().invoke(
+                cmd_mod.cmd_cmd,
+                [*META, path, "--reason", "Pinned checksum from vendor release."],
+            )
+
+        self.assertEqual(result.exit_code, 0, result.output)
+        request_override.assert_called_once()
+        run_command.assert_called_once_with([path])
+
+    def test_changed_temporary_executable_does_not_run(self):
+        path = "/tmp/ozm-test-changing-binary"
+        with patch.object(
+                 cmd_mod,
+                 "_temporary_executable",
+                 side_effect=[(path, "a" * 64), (path, "b" * 64)],
+             ), patch.object(
+                 cmd_mod,
+                 "request_override",
+                 return_value=ApprovalResult(approved=True),
+             ), patch.object(cmd_mod, "_run_command") as run_command, \
+             patch.object(cmd_mod, "audit_log"):
+            result = CliRunner().invoke(
+                cmd_mod.cmd_cmd,
+                [*META, path, "--reason", "Pinned checksum from vendor release."],
+            )
+
+        self.assertEqual(result.exit_code, cmd_mod.BLOCKED)
+        self.assertIn("changed after approval", result.output)
+        run_command.assert_not_called()
+
     def test_cmd_rejects_python_c_inline_code(self):
         result = CliRunner().invoke(cmd_mod.cmd_cmd, [*META, "python", "-c", "print(1)"])
 
