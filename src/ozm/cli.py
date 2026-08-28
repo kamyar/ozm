@@ -198,8 +198,9 @@ TIPS = [
     "Batch real multi-step logic in a script with a shebang and run it once "
     "with 'ozm run <script>'. Do not batch only ozm commands in a file or "
     "generated shell snippet; invoke each ozm command directly and separately.",
-    "Prefer read-only tools. Reach for rg, cat, nl, head, tail, ls, and git "
-    "status/log/diff before anything that mutates files or state.",
+    "Prefer proven read-only operations. Ozm recognizes conservative forms of command -v, "
+    "bazel query, brew search, npm view, and npm list without approval. Reach "
+    "for rg, cat, nl, head, tail, ls, and git status/log/diff first.",
     "Avoid complex commands. Use root-level '--grep TERM' and '--head N' "
     "options to filter command stdout without a shell pipeline. Repeat grep "
     "terms for OR matching. Filters preserve child exit codes, so do not add "

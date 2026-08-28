@@ -74,6 +74,33 @@ def _is_env_assignment_token(token: str) -> bool:
     return bool(sep and name and re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", name))
 
 
+def _builtin_read_only_reason(args: list[str]) -> str | None:
+    """Return a reason for conservative, operation-aware local reads."""
+    if not args:
+        return None
+    command = os.path.basename(args[0])
+    rest = args[1:]
+    if (
+        command == "command"
+        and len(rest) >= 2
+        and rest[0] == "-v"
+        and all(not item.startswith("-") for item in rest[1:])
+    ):
+        return "command lookup"
+    if command == "bazel" and rest[:1] == ["query"]:
+        if any(
+            item == "--output_file" or item.startswith("--output_file=")
+            for item in rest[1:]
+        ):
+            return None
+        return "bazel query"
+    if command == "brew" and rest[:1] == ["search"]:
+        return "brew search"
+    if command == "npm" and rest and rest[0] in ("view", "list"):
+        return f"npm {rest[0]}"
+    return None
+
+
 def _safe_read_only_reason(command: str) -> str | None:
     if os.environ.get("OZM_SAFE_READONLY") != "1":
         return None
@@ -434,7 +461,9 @@ def _cmd_impl(
             click.echo("ozm: override denied", err=True)
             sys.exit(DENIED)
 
-    semantic_reason = _safe_read_only_reason(command)
+    semantic_reason = _builtin_read_only_reason(args)
+    if not semantic_reason:
+        semantic_reason = _safe_read_only_reason(command)
     if not semantic_reason:
         semantic_reason = github_api_read_only_reason(args)
     if semantic_reason:
