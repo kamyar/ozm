@@ -120,6 +120,8 @@ ozm: use 'ozm run --agent-name "Run script" --agent-description "Try to execute 
 
 **Disallowed commands:** `sed`, `gsed`, and `rg --pre` are blocked even when they appear in `allowed_commands`, because they can edit files in-place or execute hidden preprocessing. Use `rg` without `--pre` for searching, `cat`/`nl`/`head`/`tail` for viewing, or write a small reviewed script and run it with `ozm run <script>` for transformations.
 
+**Sensitive command safeguards:** Bare `env` output is blocked before policy because it can expose credentials and tokens. Inspect named variables only. Executables resolved under temporary locations do not use config or command cache authorization. Ozm displays their SHA-256 digest and requires `--reason` for a one-time override. It verifies that the path and digest did not change after approval.
+
 **Recent `chmod` safeguard:** When `chmod` targets a file modified in the last 10 minutes, ozm stops before config and approval-cache checks. A script does not need `chmod +x` for `ozm run`. If the source file mode itself must change, re-run the command with `--confirm-recent-chmod`:
 
 ```bash
