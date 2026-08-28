@@ -105,7 +105,7 @@ $ ozm cmd --agent-name "Start services" --agent-description "Bring the local Doc
 
 **Built-in semantic reads:** Exact conservative forms of `command -v`, `bazel query`, `brew search`, `npm view`, and `npm list` run before allowlist, cache, and approval checks. `bazel query --output_file` and unknown or write-capable forms are not semantic reads. `gh api --help` is also a local semantic read.
 
-**Script detection:** If ozm detects you're trying to run a script file (e.g. `ozm cmd python script.py`), it will suggest using `ozm run` instead and exit. This ensures scripts go through content review.
+**Script detection:** If Ozm detects a direct script, an interpreter script, or a wrapper-based script (for example, `ozm cmd poll.sh`, `ozm cmd python script.py`, or `ozm cmd uv run script.py`), it stops before policy, cache, and approval checks. The `ozm run` suggestion preserves script arguments. Extensionless files with a shebang are also detected. This ensures script content uses review and the content hash cache.
 
 ```
 $ ozm cmd --agent-name "Run script" --agent-description "Try to execute a Python script." python myscript.py

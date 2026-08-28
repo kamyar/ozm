@@ -125,16 +125,74 @@ class CmdTests(unittest.TestCase):
         self.assertNotEqual(result.exit_code, 0)
         self.assertIn("write the code to a script file", result.output)
 
+    def test_cmd_redirects_direct_script_with_arguments_before_policy(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            with open("poll.sh", "w") as f:
+                f.write("#!/usr/bin/env bash\nprintf done\n")
+            with patch.object(cmd_mod, "is_command_blocked") as is_blocked, \
+                 patch.object(cmd_mod, "is_command_allowed") as is_allowed, \
+                 patch.object(cmd_mod, "load_hashes") as load_hashes, \
+                 patch.object(cmd_mod, "request_cmd_approval") as request_approval, \
+                 patch.object(cmd_mod, "audit_log") as audit_log:
+                result = runner.invoke(
+                    cmd_mod.cmd_cmd,
+                    [*META, "poll.sh", "--pr", "123"],
+                )
+
+        self.assertEqual(result.exit_code, cmd_mod.BLOCKED)
+        self.assertIn("ozm run", result.output)
+        self.assertIn("poll.sh --pr 123", result.output)
+        is_blocked.assert_not_called()
+        is_allowed.assert_not_called()
+        load_hashes.assert_not_called()
+        request_approval.assert_not_called()
+        audit_log.assert_called_once_with(
+            "blocked",
+            "cmd",
+            "poll.sh --pr 123",
+            "script content must use ozm run",
+        )
+
+    def test_script_detection_supports_extensionless_shebang(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            with open("poll-review", "w") as f:
+                f.write("#!/usr/bin/env bash\nprintf done\n")
+
+            match = cmd_mod._find_script_in_args(("poll-review", "--quick"))
+
+        self.assertEqual(
+            match,
+            ("poll-review", "#!/usr/bin/env bash", ("--quick",)),
+        )
+
+    def test_script_detection_ignores_python_modules_and_binary_files(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            with open("tool", "wb") as f:
+                f.write(b"\x00binary")
+
+            self.assertIsNone(
+                cmd_mod._find_script_in_args(("python3", "-m", "pytest"))
+            )
+            self.assertIsNone(cmd_mod._find_script_in_args(("tool",)))
+
     def test_cmd_rejects_uv_run_py_script(self):
         runner = CliRunner()
         with runner.isolated_filesystem():
             with open("script.py", "w") as f:
                 f.write("print('hello')\n")
-            result = runner.invoke(cmd_mod.cmd_cmd, [*META, "uv", "run", "script.py"])
+            with patch.object(cmd_mod, "audit_log"):
+                result = runner.invoke(
+                    cmd_mod.cmd_cmd,
+                    [*META, "uv", "run", "script.py", "--quick"],
+                )
 
         self.assertNotEqual(result.exit_code, 0)
         self.assertIn("ozm run", result.output)
         self.assertIn("#!/usr/bin/env python3", result.output)
+        self.assertIn("script.py --quick", result.output)
 
 
 class GitTests(unittest.TestCase):
