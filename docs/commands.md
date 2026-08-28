@@ -203,8 +203,7 @@ $ ozm git --agent-name "Commit auth fix" --agent-description "Create a single-li
 
 # Blocked: subject too long
 $ ozm git --agent-name "Commit auth fix" --agent-description "Create a single-line commit for the timeout fix." commit -m "This is a very long commit message that exceeds the seventy-two character limit for subject lines"
-# ozm: commit blocked:
-#   - Subject line is 97 chars (max 72)
+# ozm: this policy error cannot be overridden; fix the command and retry
 ```
 
 **Push rules:**
@@ -215,7 +214,10 @@ $ ozm git --agent-name "Push feature" --agent-description "Publish the current f
 
 # Blocked: force push
 $ ozm git --agent-name "Push feature" --agent-description "Publish the current feature branch." push --force
-# ozm: force push is not allowed
+# ozm: force push requires --force-with-lease=REF:EXPECTED_SHA
+
+# Override-eligible only with an exact destination and expected remote SHA
+$ ozm git --agent-name "Rewrite feature" --agent-description "Update a reviewed feature branch with a pinned lease." push --force-with-lease=refs/heads/feature-branch:0123456789abcdef0123456789abcdef01234567 --reason "Replace the reviewed feature branch tip."
 
 # Blocked: push to protected branch
 $ ozm git --agent-name "Push feature" --agent-description "Publish the current feature branch." push
@@ -233,11 +235,11 @@ $ ozm git --agent-name "Inspect branches" --agent-description "List available br
 
 **Configurable rules** (via `.ozm.yaml`):
 
-- `allow_attribution: false` — blocks `Co-Authored-By:` lines in commit messages
+- `allow_attribution: false` — blocks `Co-Authored-By:` and `Generated-by:` lines in commit messages
 - `require_branch: true` — prevents commits directly on main/master
 - `branch_prefixes: ["user/", "feat/", "fix/"]` — requires branch names to start with a listed prefix
 
-**One-time overrides:** add `--reason "justification"` to a blocked `ozm git` or config-blocked `ozm cmd` operation to ask the user for a one-time approval. Approved overrides are logged, but they are not cached and do not change allowlists.
+**One-time overrides:** add `--reason "justification"` to an override-eligible `ozm git` or config-blocked `ozm cmd` operation. Commit-message errors and broad or unpinned force pushes are not override-eligible. Approved overrides are logged, but they are not cached and do not change allowlists.
 
 ---
 

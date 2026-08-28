@@ -361,7 +361,7 @@ All script execution and git operations must go through `ozm`.
 - **Avoid sed:** `sed`/`gsed` are blocked because they can edit files in-place. Use `rg` for searching, `cat`/`nl`/`head`/`tail` for viewing, or `ozm run <script>` for transformations.
 - **Avoid curl:** `curl` is blocked by default. Install HTTPie with `uv tool install httpie` and use explicit methods (e.g. `http GET <url>`, `http POST <url> key=value`). For complex requests, write a reviewed Python script using `httpx` (or similar) and run it with `ozm run <script>`.
 - **Commit:** `ozm git --agent-name "<work>" --agent-description "<intent>" commit -m "short message"` — max 72 char subject, max 500 chars total
-- **Push:** `ozm git --agent-name "<work>" --agent-description "<intent>" push` — no force push, no pushing to main/master
+- **Push:** `ozm git --agent-name "<work>" --agent-description "<intent>" push` — broad force pushes cannot be overridden; only a full `--force-with-lease=REF:EXPECTED_SHA` can request a one-time override
 - **Status:** `ozm status` — show tracked scripts
 - **Reset:** `ozm reset <script>` or `ozm reset --all`
 
@@ -373,7 +373,7 @@ Keep commit messages short. No heredoc/EOF patterns. Simple `-m "message"` only.
 
 ## Override blocked operations
 
-If a command is blocked but you believe it's necessary, use `--reason` to request a one-time override from the user:
+If an override-eligible command is blocked, use `--reason` to request a one-time override. Commit-message errors and broad force pushes cannot be overridden:
 
     ozm git --agent-name "Ship hotfix" --agent-description "Push the production fix branch." push --reason "Hotfix for production outage, needs to go to main"
     ozm cmd --agent-name "Clean build" --agent-description "Remove generated build artifacts before rebuild." rm -rf build/ --reason "Clean build artifacts before rebuild"
@@ -400,7 +400,7 @@ All script execution and git operations must go through `ozm`.
 - **Avoid sed:** `sed`/`gsed` are blocked because they can edit files in-place. Use `rg` for searching, `cat`/`nl`/`head`/`tail` for viewing, or `ozm run <script>` for transformations.
 - **Avoid curl:** `curl` is blocked by default. Install HTTPie with `uv tool install httpie` and use explicit methods (e.g. `http GET <url>`, `http POST <url> key=value`). For complex requests, write a reviewed Python script using `httpx` (or similar) and run it with `ozm run <script>`.
 - **Commit:** `ozm git --agent-name "<work>" --agent-description "<intent>" commit -m "short message"` — max 72 char subject, max 500 chars total
-- **Push:** `ozm git --agent-name "<work>" --agent-description "<intent>" push` — no force push, no pushing to main/master
+- **Push:** `ozm git --agent-name "<work>" --agent-description "<intent>" push` — broad force pushes cannot be overridden; only a full `--force-with-lease=REF:EXPECTED_SHA` can request a one-time override
 
 ## Scripts must have a shebang
 
@@ -410,7 +410,7 @@ Keep commit messages short. No heredoc/EOF patterns. Simple `-m "message"` only.
 
 ## Override blocked operations
 
-If a command is blocked but you believe it's necessary, use `--reason` to request a one-time override from the user:
+If an override-eligible command is blocked, use `--reason` to request a one-time override. Commit-message errors and broad force pushes cannot be overridden:
 
     ozm git --agent-name "Ship hotfix" --agent-description "Push the production fix branch." push --reason "Hotfix for production outage, needs to go to main"
     ozm cmd --agent-name "Clean build" --agent-description "Remove generated build artifacts before rebuild." rm -rf build/ --reason "Clean build artifacts before rebuild"

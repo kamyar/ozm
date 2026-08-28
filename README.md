@@ -128,9 +128,9 @@ ozm git --agent-name "Commit fix" --agent-description "Create a short commit for
 ozm git --agent-name "Inspect status" --agent-description "Check the current git state." status
 ```
 
-All git subcommands pass through, but policy checks apply to commits, pushes, dangerous history-rewrite commands, and dangerous config keys. Commit messages must use one single-line `-m "message"` with a 72-character subject limit and 500-character total limit. Force pushes and pushes to `main` or `master` are blocked.
+All git subcommands pass through, but policy checks apply to commits, pushes, dangerous history-rewrite commands, and dangerous config keys. Commit messages must use one single-line `-m "message"` with a 72-character subject limit and 500-character total limit. Commit-message shape errors cannot be overridden. Broad force pushes are blocked without a dialog. Only `--force-with-lease=REF:EXPECTED_SHA` can request a one-time override. Pushes to `main` or `master` remain override-gated.
 
-If a blocked operation is genuinely necessary, add `--reason "..."` to request a one-time override:
+For an override-eligible operation, add `--reason "..."` to request a one-time override:
 
 ```bash
 ozm git --agent-name "Ship hotfix" --agent-description "Push the production fix branch." push --reason "Emergency release approved by the user."

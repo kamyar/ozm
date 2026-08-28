@@ -59,7 +59,15 @@ class GitCommitRuleTests(unittest.TestCase):
             config={"allow_attribution": False},
         )
 
-        self.assertIn("Co-Authored-By attribution is not allowed", violation)
+        self.assertIn("commit attribution is not allowed", violation)
+
+    def test_generated_by_blocked_when_attribution_is_disabled(self):
+        violation = self.check_commit(
+            ["-m", "Generated-by: Codex"],
+            config={"allow_attribution": False},
+        )
+
+        self.assertIn("commit attribution is not allowed", violation)
 
     def test_co_authored_by_in_second_message_flag_is_blocked(self):
         violation = self.check_commit(
@@ -109,15 +117,21 @@ class GitCommitCliPolicyTests(unittest.TestCase):
     def assert_commit_is_blocked(self, args, expected_fragment="single-line -m"):
         with patch.object(git_mod, "commit_config", return_value={}), \
              patch.object(git_mod, "get_current_branch", return_value="kamyar/topic"), \
-             patch.object(git_mod, "_handle_violation", side_effect=SystemExit(1)) as handle, \
+             patch.object(
+                 git_mod,
+                 "_reject_non_overridable",
+                 side_effect=SystemExit(1),
+             ) as reject, \
+             patch.object(git_mod, "_handle_violation") as handle, \
              patch.object(git_mod.subprocess, "run") as run:
             run.return_value = subprocess.CompletedProcess([], 0)
 
             result = self.invoke(["commit", *args])
 
         self.assertNotEqual(result.exit_code, 0)
-        handle.assert_called_once()
-        self.assertIn(expected_fragment, handle.call_args.args[0])
+        reject.assert_called_once()
+        self.assertIn(expected_fragment, reject.call_args.args[0])
+        handle.assert_not_called()
         run.assert_not_called()
 
     def test_commit_with_multiple_message_flags_is_blocked(self):
@@ -148,28 +162,40 @@ class GitGlobalOptionBypassTests(unittest.TestCase):
 
     def test_commit_rules_apply_after_global_c_option(self):
         with patch.object(git_mod, "commit_config", return_value={}), \
-             patch.object(git_mod, "_handle_violation", side_effect=SystemExit(1)) as handle, \
+             patch.object(
+                 git_mod,
+                 "_reject_non_overridable",
+                 side_effect=SystemExit(1),
+             ) as reject, \
+             patch.object(git_mod, "_handle_violation") as handle, \
              patch.object(git_mod.subprocess, "run") as run:
             run.return_value = subprocess.CompletedProcess([], 0)
 
             result = self.invoke(["-c", "user.name=Test", "commit", "-m", "x" * 73])
 
         self.assertNotEqual(result.exit_code, 0)
-        handle.assert_called_once()
-        self.assertIn("Subject line is 73 chars", handle.call_args.args[0])
+        reject.assert_called_once()
+        self.assertIn("Subject line is 73 chars", reject.call_args.args[0])
+        handle.assert_not_called()
         run.assert_not_called()
 
     def test_push_rules_apply_after_global_C_option(self):
         with patch.object(git_mod, "get_current_branch", return_value="kamyar/topic"), \
-             patch.object(git_mod, "_handle_violation", side_effect=SystemExit(1)) as handle, \
+             patch.object(
+                 git_mod,
+                 "_reject_non_overridable",
+                 side_effect=SystemExit(1),
+             ) as reject, \
+             patch.object(git_mod, "_handle_violation") as handle, \
              patch.object(git_mod.subprocess, "run") as run:
             run.return_value = subprocess.CompletedProcess([], 0)
 
             result = self.invoke(["-C", ".", "push", "--force-with-lease"])
 
         self.assertNotEqual(result.exit_code, 0)
-        handle.assert_called_once()
-        self.assertEqual(handle.call_args.args[0], "force push is not allowed")
+        reject.assert_called_once()
+        self.assertIn("force push requires", reject.call_args.args[0])
+        handle.assert_not_called()
         run.assert_not_called()
 
     def test_dangerous_global_config_alias_is_blocked(self):
@@ -211,8 +237,28 @@ class GitGlobalOptionBypassTests(unittest.TestCase):
         )
 
 
+class GitForceLeaseShapeTests(unittest.TestCase):
+    def test_only_full_pinned_lease_is_eligible_for_override(self):
+        valid = "--force-with-lease=refs/heads/topic:" + "a" * 40
+        self.assertEqual(git_mod._pinned_force_lease([valid]), valid)
+
+        invalid_cases = [
+            ["--force"],
+            ["--force-with-lease"],
+            ["--force-with-lease=refs/heads/topic"],
+            ["--force-with-lease=refs/heads/topic:abc123"],
+            [valid, "--force-if-includes"],
+            [valid, "+topic:topic"],
+        ]
+        for args in invalid_cases:
+            with self.subTest(args=args):
+                self.assertIsNone(git_mod._pinned_force_lease(args))
+
+
 class GitOverrideTests(unittest.TestCase):
-    def test_approved_override_runs_once_and_strips_reason(self):
+    LEASE = "--force-with-lease=refs/heads/topic:" + "a" * 40
+
+    def test_approved_pinned_lease_override_runs_once_and_strips_reason(self):
         completed = subprocess.CompletedProcess(args=[], returncode=0)
 
         with patch.object(git_mod, "get_current_branch", return_value="kamyar/topic"), \
@@ -222,26 +268,55 @@ class GitOverrideTests(unittest.TestCase):
             subprocess_mod.run.return_value = completed
             result = CliRunner().invoke(
                 git_mod.git_cmd,
-                [*META, "push", "--force", "--reason", "release emergency"],
+                [*META, "push", self.LEASE, "--reason", "rewrite reviewed branch"],
             )
 
         self.assertEqual(result.exit_code, 0)
         request_override.assert_called_once()
         subprocess_mod.run.assert_called_once_with(
-            [git_mod._git_binary(), "push", "--force"]
+            [git_mod._git_binary(), "push", self.LEASE]
         )
 
-    def test_denied_override_does_not_run(self):
+    def test_denied_pinned_lease_override_does_not_run(self):
         with patch.object(git_mod, "get_current_branch", return_value="kamyar/topic"), \
              patch.object(git_mod, "request_override", return_value=ApprovalResult(False)), \
              patch.object(git_mod, "subprocess") as subprocess_mod, \
              patch.object(git_mod, "audit_log"):
             result = CliRunner().invoke(
                 git_mod.git_cmd,
-                [*META, "push", "--force", "--reason", "release emergency"],
+                [*META, "push", self.LEASE, "--reason", "rewrite reviewed branch"],
             )
 
         self.assertNotEqual(result.exit_code, 0)
+        subprocess_mod.run.assert_not_called()
+
+    def test_broad_force_push_cannot_request_override(self):
+        with patch.object(git_mod, "request_override") as request_override, \
+             patch.object(git_mod, "subprocess") as subprocess_mod, \
+             patch.object(git_mod, "audit_log"):
+            result = CliRunner().invoke(
+                git_mod.git_cmd,
+                [*META, "push", "--force-with-lease", "--reason", "rewrite"],
+            )
+
+        self.assertEqual(result.exit_code, git_mod.BLOCKED)
+        self.assertIn("requires --force-with-lease=REF:EXPECTED_SHA", result.output)
+        request_override.assert_not_called()
+        subprocess_mod.run.assert_not_called()
+
+    def test_commit_message_error_cannot_request_override(self):
+        with patch.object(git_mod, "commit_config", return_value={}), \
+             patch.object(git_mod, "request_override") as request_override, \
+             patch.object(git_mod, "subprocess") as subprocess_mod, \
+             patch.object(git_mod, "audit_log"):
+            result = CliRunner().invoke(
+                git_mod.git_cmd,
+                [*META, "commit", "-m", "subject", "-m", "body", "--reason", "keep body"],
+            )
+
+        self.assertEqual(result.exit_code, git_mod.BLOCKED)
+        self.assertIn("cannot be overridden", result.output)
+        request_override.assert_not_called()
         subprocess_mod.run.assert_not_called()
 
 
