@@ -324,6 +324,30 @@ def add_blocked_command(pattern: str, *, global_scope: bool = False) -> bool:
     return _add_command_pattern("blocked_commands", pattern, global_scope=global_scope)
 
 
+def github_operation_allowed(operation: str, repository: str) -> bool:
+    """Return true for an exact typed operation and repository authorization."""
+    repository = repository.lower()
+    for config in _command_configs():
+        github = config.get("github", {})
+        if not isinstance(github, dict):
+            continue
+        entries = github.get("allowed_operations", [])
+        if not isinstance(entries, list):
+            continue
+        for entry in entries:
+            if not isinstance(entry, dict) or entry.get("operation") != operation:
+                continue
+            repositories = entry.get("repositories", [])
+            if not isinstance(repositories, list):
+                continue
+            if any(
+                isinstance(item, str) and item.lower() == repository
+                for item in repositories
+            ):
+                return True
+    return False
+
+
 def commit_config() -> dict:
     """Return the 'commit' section of the config."""
     config = load_project_config()
