@@ -274,6 +274,20 @@ class DirectOzmScriptTests(unittest.TestCase):
             "use root --head instead of a generated shell pipeline",
         )
 
+    def test_in_memory_shell_nudges_raw_head_pipeline(self):
+        with patch.object(run_mod, "load_hashes") as load_hashes, \
+             patch.object(run_mod, "request_approval") as request_approval, \
+             patch.object(run_mod, "audit_log"):
+            result = CliRunner().invoke(
+                shell_mod.shell_cmd,
+                ["--command", "rg -n needle src | head -n 20", *META],
+            )
+
+        self.assertEqual(result.exit_code, run_mod.BLOCKED)
+        self.assertIn("ozm --head 20 cmd", result.output)
+        load_hashes.assert_not_called()
+        request_approval.assert_not_called()
+
     def test_in_memory_shell_nudges_fallback_true(self):
         with patch.object(run_mod, "load_hashes") as load_hashes, \
              patch.object(run_mod, "request_approval") as request_approval, \
@@ -349,25 +363,90 @@ class DirectOzmScriptTests(unittest.TestCase):
 
     def test_head_pipeline_nudge_ignores_quoted_pipe_text(self):
         self.assertIsNone(
-            run_mod._generated_head_pipeline_limit([
+            run_mod._generated_head_pipeline([
                 "ozm cmd printf 'value | head -n 2'"
             ])
         )
 
     def test_head_pipeline_nudge_supports_normal_head_forms(self):
         cases = {
-            "ozm git show HEAD:file | head": 10,
-            "ozm git show HEAD:file | head -20": 20,
-            "ozm git show HEAD:file | head -n20": 20,
-            "ozm git show HEAD:file | head --lines=20": 20,
-            "ozm git show HEAD:file | head --lines 20": 20,
+            "ozm git show HEAD:file | head": (10, "ozm"),
+            "git show HEAD:file | head -20": (20, "git"),
+            "gh api repos/o/r | head -n20": (20, "gh"),
+            "rg needle src | head --lines=20": (20, "cmd"),
+            "ozm git show HEAD:file | head --lines 20": (20, "ozm"),
         }
         for command, expected in cases.items():
             with self.subTest(command=command):
                 self.assertEqual(
-                    run_mod._generated_head_pipeline_limit([command]),
+                    run_mod._generated_head_pipeline([command]),
                     expected,
                 )
+
+    def test_generated_simple_chain_nudges_direct_commands(self):
+        with patch.object(run_mod, "load_hashes") as load_hashes, \
+             patch.object(run_mod, "request_approval") as request_approval, \
+             patch.object(run_mod, "audit_log") as audit_log:
+            result = CliRunner().invoke(
+                shell_mod.shell_cmd,
+                ["--command", "git status && git log -1 --oneline", *META],
+            )
+
+        self.assertEqual(result.exit_code, run_mod.BLOCKED)
+        self.assertIn("separate simple commands", result.output)
+        self.assertIn("one at a time", result.output)
+        load_hashes.assert_not_called()
+        request_approval.assert_not_called()
+        audit_log.assert_called_once_with(
+            "blocked",
+            "run",
+            "shell:shell-command",
+            "run simple generated commands directly and separately",
+        )
+
+    def test_generated_script_wrapper_nudges_ozm_run(self):
+        cases = [
+            "cd /tmp && bash tools/githooks/install.sh",
+            "source tools/gitworktree/bootstrap-worktree.sh",
+            "./scripts/check.py --quick",
+        ]
+        for command in cases:
+            with self.subTest(command=command), \
+                 patch.object(run_mod, "load_hashes") as load_hashes, \
+                 patch.object(run_mod, "request_approval") as request_approval, \
+                 patch.object(run_mod, "audit_log"):
+                result = CliRunner().invoke(
+                    shell_mod.shell_cmd,
+                    ["--command", command, *META],
+                )
+
+            self.assertEqual(result.exit_code, run_mod.BLOCKED)
+            self.assertIn("review only the wrapper", result.output)
+            self.assertIn("ozm run", result.output)
+            load_hashes.assert_not_called()
+            request_approval.assert_not_called()
+
+    def test_quoted_chain_and_inline_python_remain_reviewable(self):
+        commands = [
+            "printf 'one && two'",
+            "python3 - <<'PY'\nprint('reviewed inline')\nPY",
+        ]
+        for command in commands:
+            with self.subTest(command=command), \
+                 patch.object(run_mod, "load_hashes", return_value={}), \
+                 patch.object(
+                     run_mod,
+                     "request_approval",
+                     return_value=ApprovalResult(approved=False),
+                 ) as request_approval, \
+                 patch.object(run_mod, "audit_log"):
+                result = CliRunner().invoke(
+                    shell_mod.shell_cmd,
+                    ["--command", command, *META],
+                )
+
+            self.assertEqual(result.exit_code, run_mod.DENIED)
+            request_approval.assert_called_once()
 
     def test_mixed_script_continues_to_normal_approval(self):
         runner = CliRunner()
