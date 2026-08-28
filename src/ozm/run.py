@@ -230,7 +230,7 @@ def _executable_lines(content: str) -> list[str]:
 
 
 def _shell_tokens(line: str) -> list[str] | None:
-    lexer = shlex.shlex(line, posix=True, punctuation_chars=";&|")
+    lexer = shlex.shlex(line, posix=True, punctuation_chars=";&|<>")
     lexer.whitespace_split = True
     try:
         return list(lexer)
@@ -260,12 +260,86 @@ def _ozm_true_operator(lines: list[str]) -> str | None:
     return "fallback" if fallback else None
 
 
-def _generated_head_pipeline_limit(lines: list[str]) -> int | None:
-    """Return the final head limit for a simple Ozm pipeline, if present."""
+def _generated_script_wrapper(lines: list[str]) -> bool:
+    """Return true when generated shell content invokes mutable script content."""
+    for line in lines:
+        tokens = _shell_tokens(line)
+        if not tokens:
+            continue
+        segment = []
+        for token in [*tokens, ";"]:
+            if token and all(char in ";&|<>" for char in token):
+                if _segment_invokes_script(segment):
+                    return True
+                segment = []
+            else:
+                segment.append(token)
+    return False
+
+
+def _segment_invokes_script(segment: list[str]) -> bool:
+    if not segment:
+        return False
+    command = os.path.basename(segment[0])
+    if command in ("source", "."):
+        return True
+    if command == "uv" and len(segment) > 1 and segment[1] == "run":
+        return _segment_invokes_script(segment[2:])
+    if command in ("bash", "sh", "zsh", "python", "python3", "node", "ruby"):
+        for arg in segment[1:]:
+            if arg == "--":
+                continue
+            if arg in ("-c", "-m", "-"):
+                return False
+            if arg.startswith("-"):
+                continue
+            return _looks_like_script_path(arg)
+        return False
+    return _looks_like_script_path(segment[0])
+
+
+def _looks_like_script_path(value: str) -> bool:
+    lowered = value.lower()
+    return lowered.endswith((".sh", ".bash", ".py", ".js", ".ts", ".rb"))
+
+
+def _generated_simple_chain(lines: list[str]) -> bool:
+    """Return true for generated shell content made of separate simple commands."""
+    if not lines:
+        return False
+    command_count = 0
+    disallowed_starts = {
+        ".", "case", "cd", "do", "done", "elif", "else", "esac", "fi",
+        "for", "function", "if", "set", "source", "then", "until", "while",
+    }
+    for line in lines:
+        tokens = _shell_tokens(line)
+        if not tokens:
+            return False
+        segment = []
+        for token in [*tokens, ";"]:
+            if token and all(char in ";&|<>" for char in token):
+                if token not in ("&&", ";") or not segment:
+                    return False
+                first = segment[0]
+                if (
+                    os.path.basename(first) in disallowed_starts
+                    or re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=.*", first)
+                ):
+                    return False
+                command_count += 1
+                segment = []
+            else:
+                segment.append(token)
+    return command_count >= 2
+
+
+def _generated_head_pipeline(lines: list[str]) -> tuple[int, str] | None:
+    """Return the final head limit and suggested Ozm command family."""
     if len(lines) != 1:
         return None
     tokens = _shell_tokens(lines[0])
-    if not tokens or os.path.basename(tokens[0]) != "ozm":
+    if not tokens:
         return None
     if (
         len(tokens) >= 3
@@ -279,23 +353,25 @@ def _generated_head_pipeline_limit(lines: list[str]) -> int | None:
     suffix = tokens[pipe_indexes[-1] + 1:]
     if not suffix or os.path.basename(suffix[0]) != "head":
         return None
+    first = os.path.basename(tokens[0])
+    family = first if first in ("git", "gh") else "ozm" if first == "ozm" else "cmd"
     head_args = suffix[1:]
     if not head_args:
-        return 10
+        return 10, family
     if len(head_args) == 1:
         if re.fullmatch(r"-[1-9][0-9]*", head_args[0]):
-            return int(head_args[0][1:])
+            return int(head_args[0][1:]), family
         short_match = re.fullmatch(r"-n([1-9][0-9]*)", head_args[0])
         if short_match:
-            return int(short_match.group(1))
+            return int(short_match.group(1)), family
         match = re.fullmatch(r"--lines=([1-9][0-9]*)", head_args[0])
-        return int(match.group(1)) if match else None
+        return (int(match.group(1)), family) if match else None
     if (
         len(head_args) == 2
         and head_args[0] in ("-n", "--lines")
         and re.fullmatch(r"[1-9][0-9]*", head_args[1])
     ):
-        return int(head_args[1])
+        return int(head_args[1]), family
     return None
 
 
@@ -364,6 +440,17 @@ def _run_reviewed_script(
     current_hash = compute_content_hash(content)
     display_content = content.decode("utf-8", errors="replace")
     executable_lines = _executable_lines(display_content)
+    generated_shell = key_target.startswith(SHELL_PREFIX)
+    if generated_shell and _generated_script_wrapper(executable_lines):
+        reason = "review invoked script content with ozm run"
+        audit_log("blocked", "run", audit_target, reason)
+        _cleanup(cleanup_path)
+        raise click_error(
+            "generated shell wrappers must not invoke or source mutable script "
+            "content. The dialog would review only the wrapper. Run the target "
+            "script through 'ozm run' so Ozm reviews its content.",
+            BLOCKED,
+        )
     true_operator = _ozm_true_operator(executable_lines)
     if true_operator == "pipe":
         reason = "pipe to true discards output and can interrupt execution"
@@ -374,23 +461,28 @@ def _run_reviewed_script(
             "stdout and can interrupt the upstream command. Remove '| true'.",
             BLOCKED,
         )
-    head_limit = (
-        _generated_head_pipeline_limit(executable_lines)
-        if key_target.startswith(SHELL_PREFIX)
+    head_pipeline = (
+        _generated_head_pipeline(executable_lines)
+        if generated_shell
         else None
     )
-    if head_limit is not None:
+    if head_pipeline is not None:
+        head_limit, family = head_pipeline
         reason = "use root --head instead of a generated shell pipeline"
         audit_log("blocked", "run", audit_target, reason)
         _cleanup(cleanup_path)
+        if family == "ozm":
+            suggestion = f"Put '--head {head_limit}' before the Ozm command family."
+        else:
+            suggestion = f"Use 'ozm --head {head_limit} {family} ...' instead."
         raise click_error(
             "generated shell pipelines ending in 'head' are not allowed. "
-            f"Put '--head {head_limit}' before the Ozm command family instead. "
-            "Combine it with repeatable root '--grep TERM' options when needed. "
-            "Do not add '|| true'; output filters preserve the child exit code.",
+            f"{suggestion} Combine it with repeatable root '--grep TERM' options "
+            "when needed. Do not add '|| true'; output filters preserve the "
+            "child exit code.",
             BLOCKED,
         )
-    if true_operator == "fallback" and key_target.startswith(SHELL_PREFIX):
+    if true_operator == "fallback" and generated_shell:
         reason = "run the Ozm command directly without fallback true"
         audit_log("blocked", "run", audit_target, reason)
         _cleanup(cleanup_path)
@@ -408,6 +500,16 @@ def _run_reviewed_script(
             "scripts that only invoke ozm are not allowed. Run each ozm "
             "command directly, one at a time, instead of opening a file for "
             "review. Direct commands can use normal automatic approvals.",
+            BLOCKED,
+        )
+    if generated_shell and _generated_simple_chain(executable_lines):
+        reason = "run simple generated commands directly and separately"
+        audit_log("blocked", "run", audit_target, reason)
+        _cleanup(cleanup_path)
+        raise click_error(
+            "generated shell content contains only separate simple commands. "
+            "Run each command directly and one at a time through 'ozm cmd', "
+            "'ozm gh', or 'ozm git' instead of opening a file for review.",
             BLOCKED,
         )
     if (
