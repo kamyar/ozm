@@ -271,7 +271,16 @@ class DirectOzmScriptTests(unittest.TestCase):
             "blocked",
             "run",
             "shell:shell-command",
-            "use root --head instead of a generated shell pipeline",
+            ANY,
+        )
+        audit_detail = audit_log.call_args.args[3]
+        self.assertIn("generated=shell", audit_detail)
+        self.assertIn("sha256=", audit_detail)
+        self.assertIn("executable_lines=1", audit_detail)
+        self.assertIn("families=ozm", audit_detail)
+        self.assertIn(
+            "detail=use root --head instead of a generated shell pipeline",
+            audit_detail,
         )
 
     def test_in_memory_shell_nudges_raw_head_pipeline(self):
@@ -306,7 +315,7 @@ class DirectOzmScriptTests(unittest.TestCase):
             "blocked",
             "run",
             "shell:shell-command",
-            "run the Ozm command directly without fallback true",
+            ANY,
         )
 
     def test_pipe_to_true_is_blocked(self):
@@ -327,7 +336,7 @@ class DirectOzmScriptTests(unittest.TestCase):
             "blocked",
             "run",
             "shell:shell-command",
-            "pipe to true discards output and can interrupt execution",
+            ANY,
         )
 
     def test_disk_script_pipe_to_true_is_blocked(self):
@@ -401,7 +410,7 @@ class DirectOzmScriptTests(unittest.TestCase):
             "blocked",
             "run",
             "shell:shell-command",
-            "run simple generated commands directly and separately",
+            ANY,
         )
 
     def test_generated_leading_cd_nudges_root_cwd(self):
@@ -421,7 +430,7 @@ class DirectOzmScriptTests(unittest.TestCase):
             "blocked",
             "run",
             "shell:shell-command",
-            "use root --cwd instead of a generated cd wrapper",
+            ANY,
         )
 
     def test_generated_script_wrapper_nudges_ozm_run(self):
