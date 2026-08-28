@@ -464,10 +464,38 @@ def _run_reviewed_script(
     display_content = content.decode("utf-8", errors="replace")
     executable_lines = _executable_lines(display_content)
     generated_shell = key_target.startswith(SHELL_PREFIX)
+    generated_review = key_target.startswith((STDIN_PREFIX, SHELL_PREFIX))
+    generated_context = None
+    if generated_review:
+        source = "shell" if generated_shell else "stdin"
+        families = []
+        for line in executable_lines:
+            tokens = _shell_tokens(line)
+            if not tokens:
+                continue
+            family = os.path.basename(tokens[0])
+            if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=.*", family):
+                family = "assignment"
+            if family not in families:
+                families.append(family)
+        family_text = ",".join(families[:5]) or "none"
+        generated_context = (
+            f"generated={source}; sha256={current_hash}; "
+            f"executable_lines={len(executable_lines)}; families={family_text}"
+        )
+
+    def log_review(action: str, detail: str | None = None) -> None:
+        feedback = detail
+        if generated_context is not None:
+            feedback = generated_context
+            if detail:
+                feedback += f"; detail={detail}"
+        audit_log(action, "run", audit_target, feedback)
+
     leading_cwd = _generated_leading_cwd(executable_lines) if generated_shell else None
     if generated_shell and _generated_script_wrapper(executable_lines):
         reason = "review invoked script content with ozm run"
-        audit_log("blocked", "run", audit_target, reason)
+        log_review("blocked", reason)
         _cleanup(cleanup_path)
         cwd_hint = ""
         if leading_cwd is not None:
@@ -481,7 +509,7 @@ def _run_reviewed_script(
     if leading_cwd is not None:
         path, family = leading_cwd
         reason = "use root --cwd instead of a generated cd wrapper"
-        audit_log("blocked", "run", audit_target, reason)
+        log_review("blocked", reason)
         _cleanup(cleanup_path)
         quoted_path = shlex.quote(path)
         if family == "ozm":
@@ -496,7 +524,7 @@ def _run_reviewed_script(
     true_operator = _ozm_true_operator(executable_lines)
     if true_operator == "pipe":
         reason = "pipe to true discards output and can interrupt execution"
-        audit_log("blocked", "run", audit_target, reason)
+        log_review("blocked", reason)
         _cleanup(cleanup_path)
         raise click_error(
             "Ozm pipelines ending in '| true' are not allowed. They discard "
@@ -511,7 +539,7 @@ def _run_reviewed_script(
     if head_pipeline is not None:
         head_limit, family = head_pipeline
         reason = "use root --head instead of a generated shell pipeline"
-        audit_log("blocked", "run", audit_target, reason)
+        log_review("blocked", reason)
         _cleanup(cleanup_path)
         if family == "ozm":
             suggestion = f"Put '--head {head_limit}' before the Ozm command family."
@@ -526,7 +554,7 @@ def _run_reviewed_script(
         )
     if true_operator == "fallback" and generated_shell:
         reason = "run the Ozm command directly without fallback true"
-        audit_log("blocked", "run", audit_target, reason)
+        log_review("blocked", reason)
         _cleanup(cleanup_path)
         raise click_error(
             "generated Ozm commands ending in '|| true' are not allowed. Run "
@@ -536,7 +564,7 @@ def _run_reviewed_script(
         )
     if _all_ozm_invocations(executable_lines):
         reason = "run ozm commands directly instead of through a reviewed file"
-        audit_log("blocked", "run", audit_target, reason)
+        log_review("blocked", reason)
         _cleanup(cleanup_path)
         raise click_error(
             "scripts that only invoke ozm are not allowed. Run each ozm "
@@ -546,7 +574,7 @@ def _run_reviewed_script(
         )
     if generated_shell and _generated_simple_chain(executable_lines):
         reason = "run simple generated commands directly and separately"
-        audit_log("blocked", "run", audit_target, reason)
+        log_review("blocked", reason)
         _cleanup(cleanup_path)
         raise click_error(
             "generated shell content contains only separate simple commands. "
@@ -559,7 +587,7 @@ def _run_reviewed_script(
         and len(executable_lines) == 1
     ):
         reason = "one-command scripts must run as direct ozm commands"
-        audit_log("blocked", "run", audit_target, reason)
+        log_review("blocked", reason)
         _cleanup(cleanup_path)
         raise click_error(
             "one-command scripts are not allowed. Run the command directly "
@@ -571,7 +599,7 @@ def _run_reviewed_script(
     try:
         hashes = load_hashes()
     except (OSError, RuntimeError) as exc:
-        audit_log("error", "run", audit_target, str(exc))
+        log_review("error", str(exc))
         _cleanup(cleanup_path)
         raise click_error(
             f"approval cache error: {exc}. The script was NOT executed.",
@@ -581,7 +609,7 @@ def _run_reviewed_script(
 
     try:
         if stored_hash == current_hash:
-            audit_log("cached", "run", audit_target)
+            log_review("cached")
             click.echo("ozm: allowed (cached)", err=True)
             _execute_script(abs_path, args, content)
 
@@ -606,7 +634,7 @@ def _run_reviewed_script(
             try:
                 save_hashes(hashes)
             except (OSError, RuntimeError) as exc:
-                audit_log("error", "run", audit_target, str(exc))
+                log_review("error", str(exc))
                 raise click_error(
                     f"could not save approval cache: {exc}. The script was NOT executed.",
                     CONFIG_ERROR,
@@ -615,7 +643,7 @@ def _run_reviewed_script(
                 save_snapshot(key, abs_path, content=content)
             except (OSError, RuntimeError):
                 pass
-            audit_log("clicked", "run", audit_target, approval.feedback)
+            log_review("clicked", approval.feedback)
             if approval.feedback:
                 click.echo(f"ozm: approved {display_name} — [user] {approval.feedback}", err=True)
             else:
@@ -623,14 +651,14 @@ def _run_reviewed_script(
             _execute_script(abs_path, args, content)
 
         if approval.approved is False:
-            audit_log("denied", "run", audit_target, approval.feedback)
+            log_review("denied", approval.feedback)
             if approval.feedback:
                 click.echo(f"ozm: denied {display_name} — [user] {approval.feedback}", err=True)
             else:
                 click.echo(f"ozm: denied {display_name}", err=True)
             sys.exit(DENIED)
 
-        audit_log("no-dialog", "run", audit_target, approval.feedback)
+        log_review("no-dialog", approval.feedback)
         click.echo(f"ozm: [{label}] {display_name}")
         show_file(script, content=display_content)
         if approval.feedback:

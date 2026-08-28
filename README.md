@@ -201,7 +201,7 @@ See [docs/configuration.md](docs/configuration.md) for all options.
 4. Commands are checked against hard safety rules, project/global blocklists, semantic read-only rules, project/global allowlists, and the project-scoped approval cache.
 5. Unknown commands and new or changed scripts open a native macOS approval dialog.
 6. Approved script contents and exact commands are stored per project in `~/.ozm/hashes.yaml`; changed script snapshots live under `~/.ozm/snapshots/`.
-7. Every decision is appended to `~/.ozm/audit.log` with action source such as `clicked`, `cached`, `config`, `semantic`, `override`, `denied`, `blocked`, or `no-dialog`.
+7. Every decision is appended to `~/.ozm/audit.log`. Use `ozm log --summary --since 3h` to count manual approvals, denials, and generated run approvals. Generated run entries include a content digest and safe command-family summary. Actions include `clicked`, `cached`, `config`, `semantic`, `operation`, `override`, `denied`, `blocked`, or `no-dialog`.
 
 On macOS, approvals use native Cocoa dialogs with syntax highlighting via Pygments, dark mode support, agent work context, editable command fields, and inline feedback. Without a GUI session, unknown commands and new or changed scripts are blocked rather than silently approved.
 

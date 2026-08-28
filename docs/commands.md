@@ -331,7 +331,7 @@ After reset, the next `ozm run` or `ozm cmd` will prompt for approval again.
 Show recent entries from the audit log at `~/.ozm/audit.log`. Every approval, denial, and block is recorded with timestamp, action, type, working directory, and target.
 
 ```
-ozm log [-n COUNT]
+ozm log [-n COUNT] [--since DURATION] [--summary] [--json]
 ```
 
 **Examples:**
@@ -339,6 +339,13 @@ ozm log [-n COUNT]
 ```bash
 # Show last 20 entries (default)
 $ ozm log
+
+# Summarize the last three hours
+$ ozm log --summary --since 3h
+entries: 625
+manual approvals: 127
+manual denials: 9
+generated run approvals: 63
 
 # Show last 5 entries
 $ ozm log -n 5
@@ -351,7 +358,7 @@ $ ozm log -n 5
 
 Actions: `clicked` (user approved), `cached` (hash matched), `config` (allowlist match), `semantic` (built-in read-only classifier), `operation` (typed repository-scoped GitHub authorization), `override` (user-approved one-time override), `denied`, `blocked`, `error`, `no-dialog` (GUI unavailable, command blocked).
 
-The `# comment` at the end is the user's feedback from the approval dialog.
+The `# comment` at the end is the user's feedback or decision context. Generated `shell:` and `stdin:` run entries include only their source type, content SHA-256, executable-line count, and command-family names. Ozm does not add full generated content or arguments to the audit line.
 
 ---
 
