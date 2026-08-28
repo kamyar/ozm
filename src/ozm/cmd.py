@@ -22,6 +22,7 @@ from ozm.config import (
     command_name,
     command_parts,
     disallowed_command_reason,
+    github_operation_allowed,
     has_shell_metacharacters,
     is_command_allowed,
     is_command_blocked,
@@ -29,9 +30,11 @@ from ozm.config import (
 )
 from ozm.github_api import read_only_reason as github_api_read_only_reason
 from ozm.github_operations import (
-    match_raw_review_reply,
-    parse_review_reply,
-    review_reply_execution_args,
+    AddSubIssueOperation,
+    ReviewReplyOperation,
+    github_operation_execution_args,
+    match_supported_raw_write,
+    parse_typed_operation,
 )
 from ozm.output_filter import output_filter_active, run_with_output_filter
 from ozm.paths import trusted_executable
@@ -54,7 +57,7 @@ def _scope_label(global_scope: bool) -> str:
 
 def _run_command(argv: list[str]) -> subprocess.CompletedProcess:
     execution_argv = list(argv)
-    typed_github_argv = review_reply_execution_args(execution_argv)
+    typed_github_argv = github_operation_execution_args(execution_argv)
     if typed_github_argv is not None:
         execution_argv = typed_github_argv
     if execution_argv and execution_argv[0] == "gh":
@@ -336,31 +339,46 @@ def _reject_supported_raw_github_write(
     if not args or os.path.basename(args[0]) != "gh":
         return
     normalized_args = ["gh", *args[1:]]
-    operation = match_raw_review_reply(normalized_args)
+    operation = match_supported_raw_write(normalized_args)
     if operation is None:
         return
 
     command = shlex.join(normalized_args)
     suggestion = _native_gh_suggestion(agent, operation.typed_args())
+    typed_name = " ".join(operation.typed_args()[:2])
+    raw_label = (
+        "review-reply"
+        if operation.operation_name == "pr.review-reply"
+        else operation.operation_name
+    )
+    reason_label = (
+        "pr review-reply"
+        if operation.operation_name == "pr.review-reply"
+        else typed_name
+    )
     audit_log(
         "blocked",
         audit_kind,
         command,
-        "raw review-reply POST must use pr review-reply",
+        f"raw {raw_label} POST must use {reason_label}",
     )
     click.echo(
-        "ozm: raw review-reply POST is not allowed because ozm supports "
-        "'pr review-reply'.",
+        f"ozm: raw {raw_label} POST is not allowed because Ozm supports "
+        f"'{typed_name}'.",
         err=True,
     )
     click.echo(f"ozm: re-run as: {suggestion}", err=True)
-    raise click_error("use the typed 'ozm gh pr review-reply' operation", BLOCKED)
+    raise click_error(f"use the typed 'ozm gh {typed_name}' operation", BLOCKED)
 
 
-def _validate_github_proxy_args(args: list[str], agent) -> None:
+def _validate_github_proxy_args(
+    args: list[str],
+    agent,
+) -> ReviewReplyOperation | AddSubIssueOperation | None:
     _reject_supported_raw_github_write(args, agent, audit_kind="gh")
     if args and args[0] == "gh":
-        parse_review_reply(args[1:])
+        return parse_typed_operation(args[1:])
+    return None
 
 
 def _reject_gh_via_cmd(args: list[str], agent) -> None:
@@ -405,8 +423,9 @@ def _cmd_impl(
             args.pop(i)
             break
 
+    typed_operation = None
     if github_proxy:
-        _validate_github_proxy_args(args, agent)
+        typed_operation = _validate_github_proxy_args(args, agent)
     else:
         _reject_gh_via_cmd(args, agent)
 
@@ -493,6 +512,28 @@ def _cmd_impl(
             audit_log("denied", audit_kind, command, approval.feedback)
             click.echo("ozm: override denied", err=True)
             sys.exit(DENIED)
+
+    if typed_operation is not None:
+        try:
+            operation_allowed = github_operation_allowed(
+                typed_operation.operation_name,
+                typed_operation.repository,
+            )
+        except (OSError, RuntimeError) as exc:
+            audit_log("error", audit_kind, command, str(exc))
+            raise click_error(
+                f"config error: {exc}. The command was NOT executed.",
+                CONFIG_ERROR,
+            ) from exc
+        if operation_allowed:
+            operation_reason = (
+                f"github {typed_operation.operation_name} for "
+                f"{typed_operation.repository}"
+            )
+            audit_log("operation", "gh", command, operation_reason)
+            click.echo(f"ozm: allowed ({operation_reason})", err=True)
+            result = _run_command(args)
+            sys.exit(result.returncode)
 
     semantic_reason = _builtin_read_only_reason(args)
     if not semantic_reason:

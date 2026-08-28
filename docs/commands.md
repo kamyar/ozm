@@ -181,7 +181,7 @@ ozm gh --agent-name "Reply to review" --agent-description "Reply to one PR revie
 
 Use `ozm gh` instead of direct `gh` or `ozm cmd gh ...` commands. Ozm resolves the real `gh` executable from trusted system locations before execution. Known high-level reads, REST `GET` and `HEAD` requests, and proven GraphQL queries run directly. Writes and unknown operations continue through project/global blocklists, allowlists, the approval cache, and the approval dialog. Native proxy operations use `gh` as the audit kind, so they are distinct from generic `cmd` entries.
 
-`pr review-reply` validates `OWNER/REPOSITORY`, the pull-request number, the review-comment ID, and exactly one of `--body` or `--body-file`. It then uses a fixed GitHub review-reply endpoint. A matching raw `gh api -X POST repos/OWNER/REPOSITORY/pulls/NUMBER/comments/COMMENT_ID/replies ...` request is blocked before policy, cache, or approval checks. Ozm prints the equivalent typed command.
+`pr review-reply` validates `OWNER/REPOSITORY`, the pull-request number, the review-comment ID, and exactly one of `--body` or `--body-file`. `issue add-sub-issue` validates the repository, parent issue number, and GitHub numeric sub-issue database ID. Each typed operation uses a fixed endpoint. Configure exact repository authorization under `github.allowed_operations` to skip repeat approvals. Without that policy, typed writes retain normal approval. A matching raw `gh api -X POST repos/OWNER/REPOSITORY/pulls/NUMBER/comments/COMMENT_ID/replies ...` request is blocked before policy, cache, or approval checks. Ozm prints the equivalent typed command.
 
 To pass `--help` to the underlying GitHub CLI, use `ozm gh --agent-name "Read GitHub help" --agent-description "Show GitHub CLI help." -- --help`. A plain `ozm gh --help` shows proxy help.
 
@@ -347,7 +347,7 @@ $ ozm log -n 5
 2026-04-26 10:18:30  config     cmd  /Users/you/project  docker compose up
 ```
 
-Actions: `clicked` (user approved), `cached` (hash matched), `config` (allowlist match), `semantic` (built-in read-only classifier), `override` (user-approved one-time override), `denied`, `blocked`, `error`, `no-dialog` (GUI unavailable, command blocked).
+Actions: `clicked` (user approved), `cached` (hash matched), `config` (allowlist match), `semantic` (built-in read-only classifier), `operation` (typed repository-scoped GitHub authorization), `override` (user-approved one-time override), `denied`, `blocked`, `error`, `no-dialog` (GUI unavailable, command blocked).
 
 The `# comment` at the end is the user's feedback from the approval dialog.
 

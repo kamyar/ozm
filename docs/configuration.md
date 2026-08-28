@@ -83,6 +83,23 @@ blocked_commands:
 
 Use global rules for commands that are safe across projects. Use project rules for commands whose safety depends on a repository, environment, or service. Within the same action, project rules are checked before global rules, but every blocklist always wins over every allowlist.
 
+### Typed GitHub operations
+
+Routine typed GitHub writes can be authorized for exact repositories. Wildcards are not supported:
+
+```yaml
+github:
+  allowed_operations:
+    - operation: pr.review-reply
+      repositories:
+        - doordash/pedregal
+    - operation: issue.add-sub-issue
+      repositories:
+        - doordash/pedregal
+```
+
+Ozm checks project configuration before global configuration. The operation and `OWNER/REPOSITORY` must both match exactly, except that repository case is ignored. Unknown operations, malformed entries, raw API writes, and other repositories retain normal approval checks.
+
 ### commit
 
 Rules enforced by `ozm git commit`.
@@ -98,7 +115,7 @@ commit:
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `allow_attribution` | bool | `true` | When `false`, blocks commits containing `Co-Authored-By:` |
+| `allow_attribution` | bool | `true` | When `false`, blocks `Co-Authored-By:` and `Generated-by:` attribution |
 | `require_branch` | bool | `false` | When `true`, blocks commits directly on main/master |
 | `branch_prefixes` | list | `[]` | When non-empty, branch names must start with one of these prefixes (main/master are exempt) |
 
