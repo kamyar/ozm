@@ -36,6 +36,30 @@ struct ApprovalRequest: Codable, Sendable {
         var violation: String?
         var reason: String?
 
+        var isGeneratedShellCommand: Bool {
+            generatedInMemory == true && script?.hasPrefix("shell:") == true
+        }
+
+        var displayedContent: String? {
+            guard isGeneratedShellCommand, let content else { return content }
+            var lines = content.split(separator: "\n", omittingEmptySubsequences: false)
+            if lines.first?.hasPrefix("#!") == true {
+                lines.removeFirst()
+            }
+            return lines.joined(separator: "\n")
+        }
+
+        var displayedLineCount: Int? {
+            guard isGeneratedShellCommand, let content = displayedContent else {
+                return lineCount
+            }
+            guard !content.isEmpty else { return 0 }
+            return content.split(
+                separator: "\n",
+                omittingEmptySubsequences: false
+            ).count - (content.hasSuffix("\n") ? 1 : 0)
+        }
+
         enum CodingKeys: String, CodingKey {
             case script, label, content, diff
             case lineCount = "line_count"

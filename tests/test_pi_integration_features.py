@@ -166,7 +166,7 @@ class StdinShellTests(unittest.TestCase):
 
         with patch.object(run_mod, "load_hashes", return_value={}), \
              patch.object(run_mod, "save_hashes", side_effect=fake_save_hashes), \
-             patch.object(run_mod, "save_snapshot"), \
+             patch.object(run_mod, "save_snapshot") as save_snapshot, \
              patch.object(run_mod, "request_approval", return_value=ApprovalResult(True)) as request_approval, \
              patch.object(run_mod.subprocess, "run", return_value=completed) as subprocess_run, \
              patch.object(run_mod, "audit_log"):
@@ -180,6 +180,7 @@ class StdinShellTests(unittest.TestCase):
         self.assertIn(run_mod.project_key("stdin:pi-test"), saved_hashes)
         self.assertEqual(request_approval.call_args.kwargs["display_path"], "stdin:pi-test")
         self.assertTrue(request_approval.call_args.kwargs["generated_in_memory"])
+        save_snapshot.assert_not_called()
         argv = subprocess_run.call_args.args[0]
         self.assertEqual(len(argv), 1)
         self.assertFalse(os.path.exists(argv[0]))
@@ -205,6 +206,32 @@ class StdinShellTests(unittest.TestCase):
             "shell:pi-shell",
         )
         self.assertNotIn("one-command scripts are not allowed", result.output)
+
+    def test_changed_bash_command_shows_full_review_without_snapshot_diff(self):
+        key = run_mod.project_key("shell:pi-shell")
+        with patch.object(run_mod, "load_hashes", return_value={key: "old-hash"}), \
+             patch.object(run_mod, "snapshot_diff") as snapshot_diff, \
+             patch.object(
+                 run_mod,
+                 "request_approval",
+                 return_value=ApprovalResult(approved=False),
+             ) as request_approval, \
+             patch.object(run_mod, "audit_log"):
+            result = CliRunner().invoke(
+                shell_mod.shell_cmd,
+                [
+                    "--command",
+                    "git show origin/main:path/to/file | tail -n 20",
+                    "--title",
+                    "pi-shell",
+                    *META,
+                ],
+            )
+
+        self.assertEqual(result.exit_code, run_mod.DENIED, result.output)
+        self.assertEqual(request_approval.call_args.args[1], "REVIEW")
+        self.assertIsNone(request_approval.call_args.kwargs["snapshot_diff"])
+        snapshot_diff.assert_not_called()
 
     def test_bash_command_is_converted_to_reviewed_stdin_script(self):
         with patch.object(shell_mod, "run_stdin_content") as run_stdin_content:

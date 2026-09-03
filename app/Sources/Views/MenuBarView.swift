@@ -62,23 +62,31 @@ struct MenuBarView: View {
             ForEach(queue.pending) { item in
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(spacing: 8) {
-                        Image(systemName: typeIcon(for: item.request.type))
+                        Image(systemName: typeIcon(for: item.request))
                             .foregroundStyle(item.request.type == .override ? .red : .blue)
                             .frame(width: 20)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(item.request.agent.name)
                                 .font(.callout.weight(.medium))
                                 .lineLimit(1)
-                            Text(item.request.payload.command ?? item.request.payload.script ?? item.request.agent.description)
+                            Text(summaryText(for: item.request))
                                 .font(.system(.caption, design: .monospaced))
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
                         }
                         Spacer()
                         if item.request.payload.generatedInMemory == true {
-                            Image(systemName: "memorychip")
+                            Image(
+                                systemName: item.request.payload.isGeneratedShellCommand
+                                    ? "terminal"
+                                    : "memorychip"
+                            )
                                 .foregroundStyle(.orange)
-                                .help("Ozm generated this in-memory review file.")
+                                .help(
+                                    item.request.payload.isGeneratedShellCommand
+                                        ? "Ozm generated this shell command."
+                                        : "Ozm generated this in-memory review file."
+                                )
                         }
                     }
                     HStack(spacing: 6) {
@@ -92,9 +100,22 @@ struct MenuBarView: View {
         }
     }
 
-    private func typeIcon(for type: ApprovalRequest.RequestType) -> String {
-        switch type {
-        case .fileApproval: "doc.text"
+    private func summaryText(for request: ApprovalRequest) -> String {
+        if request.payload.isGeneratedShellCommand,
+           let content = request.payload.displayedContent {
+            return content.split(separator: "\n", omittingEmptySubsequences: true)
+                .first
+                .map(String.init) ?? "Shell command"
+        }
+        return request.payload.command
+            ?? request.payload.script
+            ?? request.agent.description
+    }
+
+    private func typeIcon(for request: ApprovalRequest) -> String {
+        switch request.type {
+        case .fileApproval:
+            request.payload.isGeneratedShellCommand ? "terminal" : "doc.text"
         case .cmdApproval: "terminal"
         case .override: "exclamationmark.shield"
         case .status: "info.circle"

@@ -459,10 +459,30 @@ def _approve_file_macos(
 ) -> ApprovalResult:
     abs_path = os.path.abspath(script)
     shown_path = display_path or abs_path
-    line_count = len(content.splitlines()) if content is not None else _count_lines(script)
-    title = f"[{label}] {agent.name}"
+    shell_command = generated_in_memory and shown_path.startswith("shell:")
+    shown_content = content
+    if shell_command and shown_content is not None:
+        lines = shown_content.splitlines(keepends=True)
+        if lines and lines[0].startswith("#!"):
+            shown_content = "".join(lines[1:])
+    line_count = (
+        len(shown_content.splitlines())
+        if shown_content is not None
+        else _count_lines(script)
+    )
+    title = (
+        f"[{label}] Shell command — {agent.name}"
+        if shell_command
+        else f"[{label}] {agent.name}"
+    )
     agent_context = _agent_context(agent)
-    source_context = "Generated in memory by Ozm — " if generated_in_memory else ""
+    source_context = (
+        "Ozm shell command — "
+        if shell_command
+        else "Generated in memory by Ozm — "
+        if generated_in_memory
+        else ""
+    )
 
     rtf_tmp = None
     diff_tmp = None
@@ -481,13 +501,13 @@ def _approve_file_macos(
             set_section = _SET_PLAIN
     else:
         subtitle = f"{agent_context} — {source_context}{shown_path} — {line_count} lines"
-        rtf_content = _render_rtf(abs_path, content)
+        rtf_content = _render_rtf(abs_path, shown_content)
         if rtf_content:
             rtf_tmp = _secure_tmpfile(".rtf", rtf_content)
             load_section = _LOAD_RTF.replace("__RTFPATH__", _escape(rtf_tmp))
             set_section = _SET_RTF
-        elif content is not None:
-            plain_tmp = _secure_tmpfile(".txt", content)
+        elif shown_content is not None:
+            plain_tmp = _secure_tmpfile(".txt", shown_content)
             load_section = _LOAD_PLAIN.replace("__FILEPATH__", _escape(plain_tmp))
             set_section = _SET_PLAIN
         else:
