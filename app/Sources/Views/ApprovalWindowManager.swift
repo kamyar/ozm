@@ -130,7 +130,9 @@ struct ApprovalWindowContent: View {
             }
             Spacer()
             if item.request.payload.generatedInMemory == true {
-                GeneratedInMemoryBadge()
+                GeneratedInMemoryBadge(
+                    isShellCommand: item.request.payload.isGeneratedShellCommand
+                )
             }
         }
         .padding()
@@ -138,7 +140,10 @@ struct ApprovalWindowContent: View {
 
     private var typeIcon: String {
         switch item.request.type {
-        case .fileApproval: "doc.text.magnifyingglass"
+        case .fileApproval:
+            item.request.payload.isGeneratedShellCommand
+                ? "terminal"
+                : "doc.text.magnifyingglass"
         case .cmdApproval: "terminal"
         case .override: "exclamationmark.shield"
         case .status: "info.circle"
@@ -148,7 +153,9 @@ struct ApprovalWindowContent: View {
     private var typeTitle: String {
         switch item.request.type {
         case .fileApproval:
-            "[\(item.request.payload.label ?? "NEW")] \(item.request.agent.name)"
+            item.request.payload.isGeneratedShellCommand
+                ? "[REVIEW] Shell command — \(item.request.agent.name)"
+                : "[\(item.request.payload.label ?? "NEW")] \(item.request.agent.name)"
         case .cmdApproval:
             "Command — \(item.request.agent.name)"
         case .override:
@@ -181,11 +188,11 @@ struct ApprovalWindowContent: View {
         VStack(alignment: .leading, spacing: 8) {
             if let script = item.request.payload.script {
                 HStack {
-                    Image(systemName: "doc")
-                    Text(script)
+                    Image(systemName: item.request.payload.isGeneratedShellCommand ? "terminal" : "doc")
+                    Text(item.request.payload.isGeneratedShellCommand ? "Shell command" : script)
                         .font(.system(.caption, design: .monospaced))
                     Spacer()
-                    if let lineCount = item.request.payload.lineCount {
+                    if let lineCount = item.request.payload.displayedLineCount {
                         Text("\(lineCount) lines")
                             .font(.caption)
                             .foregroundStyle(.tertiary)
@@ -194,8 +201,11 @@ struct ApprovalWindowContent: View {
                 .foregroundStyle(.secondary)
             }
 
-            let isDiff = item.request.payload.diff != nil
-            let displayText = item.request.payload.diff ?? item.request.payload.content ?? ""
+            let isDiff = !item.request.payload.isGeneratedShellCommand
+                && item.request.payload.diff != nil
+            let displayText = item.request.payload.isGeneratedShellCommand
+                ? item.request.payload.displayedContent ?? ""
+                : item.request.payload.diff ?? item.request.payload.content ?? ""
             ColoredCodeView(text: displayText, isDiff: isDiff, syntax: item.request.payload.syntax)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(8)
@@ -307,8 +317,13 @@ struct ApprovalWindowContent: View {
 }
 
 struct GeneratedInMemoryBadge: View {
+    let isShellCommand: Bool
+
     var body: some View {
-        Label("Ozm in-memory file", systemImage: "memorychip")
+        Label(
+            isShellCommand ? "Ozm shell command" : "Ozm in-memory file",
+            systemImage: isShellCommand ? "terminal" : "memorychip"
+        )
             .font(.caption.weight(.medium))
             .foregroundStyle(.orange)
             .padding(.horizontal, 8)
@@ -319,7 +334,11 @@ struct GeneratedInMemoryBadge: View {
                 Capsule()
                     .stroke(Color.orange.opacity(0.35))
             )
-            .help("Ozm generated this temporary review file. It is not a source file on disk.")
+            .help(
+                isShellCommand
+                    ? "Ozm will run this reviewed shell command in memory."
+                    : "Ozm generated this temporary review file. It is not a source file on disk."
+            )
     }
 }
 

@@ -8,7 +8,8 @@ struct ApprovalRow: View {
 
     private var typeIcon: String {
         switch item.request.type {
-        case .fileApproval: "doc.text"
+        case .fileApproval:
+            item.request.payload.isGeneratedShellCommand ? "terminal" : "doc.text"
         case .cmdApproval: "terminal"
         case .override: "exclamationmark.shield"
         case .status: "info.circle"
@@ -18,7 +19,9 @@ struct ApprovalRow: View {
     private var typeLabel: String {
         switch item.request.type {
         case .fileApproval:
-            "[\(item.request.payload.label ?? "NEW")] Script"
+            item.request.payload.isGeneratedShellCommand
+                ? "[REVIEW] Shell command"
+                : "[\(item.request.payload.label ?? "NEW")] Script"
         case .cmdApproval: "Command"
         case .override: "Override"
         case .status: "Status"
@@ -124,22 +127,29 @@ struct FileApprovalDetail: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             if payload.generatedInMemory == true {
-                GeneratedInMemoryBadge()
+                GeneratedInMemoryBadge(
+                    isShellCommand: payload.isGeneratedShellCommand
+                )
             }
             if let script = payload.script {
-                Label(script, systemImage: "doc")
+                Label(
+                    payload.isGeneratedShellCommand ? "Shell command" : script,
+                    systemImage: payload.isGeneratedShellCommand ? "terminal" : "doc"
+                )
                     .font(.caption.monospaced())
                     .foregroundStyle(.secondary)
             }
-            if let lineCount = payload.lineCount {
+            if let lineCount = payload.displayedLineCount {
                 Text("\(lineCount) lines")
                     .font(.caption)
                     .foregroundStyle(.tertiary)
             }
             ScrollView {
                 ColoredCodeView(
-                    text: payload.diff ?? payload.content ?? "",
-                    isDiff: payload.diff != nil,
+                    text: payload.isGeneratedShellCommand
+                        ? payload.displayedContent ?? ""
+                        : payload.diff ?? payload.content ?? "",
+                    isDiff: !payload.isGeneratedShellCommand && payload.diff != nil,
                     syntax: payload.syntax
                 )
                 .frame(maxWidth: .infinity, alignment: .leading)

@@ -613,11 +613,22 @@ def _run_reviewed_script(
             click.echo("ozm: allowed (cached)", err=True)
             _execute_script(abs_path, args, content)
 
-        label = "NEW" if stored_hash is None else "CHANGED"
-
-        snap_diff = None
-        if label == "CHANGED":
-            snap_diff, _, _ = snapshot_diff(key, abs_path, content=display_content)
+        # Generated shell/stdin content has no persistent source identity.
+        # Reusing a title such as shell:shell-command does not make two snippets
+        # revisions of the same file. Always show the complete generated content
+        # instead of comparing it with an unrelated prior approval.
+        if generated_review:
+            label = "REVIEW"
+            snap_diff = None
+        else:
+            label = "NEW" if stored_hash is None else "CHANGED"
+            snap_diff = None
+            if label == "CHANGED":
+                snap_diff, _, _ = snapshot_diff(
+                    key,
+                    abs_path,
+                    content=display_content,
+                )
 
         approval = request_approval(
             script,
@@ -639,10 +650,11 @@ def _run_reviewed_script(
                     f"could not save approval cache: {exc}. The script was NOT executed.",
                     CONFIG_ERROR,
                 ) from exc
-            try:
-                save_snapshot(key, abs_path, content=content)
-            except (OSError, RuntimeError):
-                pass
+            if not generated_review:
+                try:
+                    save_snapshot(key, abs_path, content=content)
+                except (OSError, RuntimeError):
+                    pass
             log_review("clicked", approval.feedback)
             if approval.feedback:
                 click.echo(f"ozm: approved {display_name} — [user] {approval.feedback}", err=True)
