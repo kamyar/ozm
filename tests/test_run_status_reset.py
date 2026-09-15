@@ -392,6 +392,30 @@ class DirectOzmScriptTests(unittest.TestCase):
                     expected,
                 )
 
+    def test_generated_direct_command_classifier_is_conservative(self):
+        direct_cases = {
+            "rg -n 'TODO|FIXME' src": "cmd",
+            "git status --short": "git",
+            "gh pr view 42 --repo owner/repo": "gh",
+        }
+        for command, family in direct_cases.items():
+            with self.subTest(command=command):
+                self.assertEqual(
+                    run_mod._generated_direct_command([command]),
+                    family,
+                )
+
+        shell_cases = [
+            "rg TODO src | sort",
+            "printf '%s\\n' \"$HOME\"",
+            "printf '%s\\n' *.py",
+            "VALUE=one command",
+            "cd /tmp",
+        ]
+        for command in shell_cases:
+            with self.subTest(command=command):
+                self.assertIsNone(run_mod._generated_direct_command([command]))
+
     def test_generated_simple_chain_nudges_direct_commands(self):
         with patch.object(run_mod, "load_hashes") as load_hashes, \
              patch.object(run_mod, "request_approval") as request_approval, \
@@ -457,27 +481,39 @@ class DirectOzmScriptTests(unittest.TestCase):
             load_hashes.assert_not_called()
             request_approval.assert_not_called()
 
-    def test_quoted_chain_and_inline_python_remain_reviewable(self):
-        commands = [
-            "printf 'one && two'",
-            "python3 - <<'PY'\nprint('reviewed inline')\nPY",
-        ]
-        for command in commands:
-            with self.subTest(command=command), \
-                 patch.object(run_mod, "load_hashes", return_value={}), \
-                 patch.object(
-                     run_mod,
-                     "request_approval",
-                     return_value=ApprovalResult(approved=False),
-                 ) as request_approval, \
-                 patch.object(run_mod, "audit_log"):
-                result = CliRunner().invoke(
-                    shell_mod.shell_cmd,
-                    ["--command", command, *META],
-                )
+    def test_quoted_operator_text_redirects_to_direct_command(self):
+        with patch.object(run_mod, "load_hashes") as load_hashes, \
+             patch.object(run_mod, "request_approval") as request_approval, \
+             patch.object(run_mod, "audit_log"):
+            result = CliRunner().invoke(
+                shell_mod.shell_cmd,
+                ["--command", "printf 'one && two'", *META],
+            )
 
-            self.assertEqual(result.exit_code, run_mod.DENIED)
-            request_approval.assert_called_once()
+        self.assertEqual(result.exit_code, run_mod.BLOCKED)
+        self.assertIn("ozm cmd", result.output)
+        load_hashes.assert_not_called()
+        request_approval.assert_not_called()
+
+    def test_inline_python_heredoc_remains_reviewable(self):
+        with patch.object(run_mod, "load_hashes", return_value={}), \
+             patch.object(
+                 run_mod,
+                 "request_approval",
+                 return_value=ApprovalResult(approved=False),
+             ) as request_approval, \
+             patch.object(run_mod, "audit_log"):
+            result = CliRunner().invoke(
+                shell_mod.shell_cmd,
+                [
+                    "--command",
+                    "python3 - <<'PY'\nprint('reviewed inline')\nPY",
+                    *META,
+                ],
+            )
+
+        self.assertEqual(result.exit_code, run_mod.DENIED)
+        request_approval.assert_called_once()
 
     def test_mixed_script_continues_to_normal_approval(self):
         runner = CliRunner()

@@ -185,7 +185,22 @@ class StdinShellTests(unittest.TestCase):
         self.assertEqual(len(argv), 1)
         self.assertFalse(os.path.exists(argv[0]))
 
-    def test_bash_allows_one_direct_shell_command(self):
+    def test_bash_redirects_one_direct_command_before_approval(self):
+        with patch.object(run_mod, "load_hashes") as load_hashes, \
+             patch.object(run_mod, "request_approval") as request_approval, \
+             patch.object(run_mod, "audit_log"):
+            result = CliRunner().invoke(
+                shell_mod.shell_cmd,
+                ["--command", "rg -n TODO src", "--title", "pi-shell", *META],
+            )
+
+        self.assertEqual(result.exit_code, run_mod.BLOCKED)
+        self.assertIn("does not use shell-only behavior", result.output)
+        self.assertIn("ozm cmd", result.output)
+        load_hashes.assert_not_called()
+        request_approval.assert_not_called()
+
+    def test_bash_pipeline_continues_to_shell_approval(self):
         with patch.object(run_mod, "load_hashes", return_value={}), \
              patch.object(
                  run_mod,
@@ -195,17 +210,17 @@ class StdinShellTests(unittest.TestCase):
              patch.object(run_mod, "audit_log"):
             result = CliRunner().invoke(
                 shell_mod.shell_cmd,
-                ["--command", "rg -n TODO src", "--title", "pi-shell", *META],
+                [
+                    "--command",
+                    "rg -n TODO src | sort",
+                    "--title",
+                    "pi-shell",
+                    *META,
+                ],
             )
 
         self.assertEqual(result.exit_code, run_mod.DENIED)
         request_approval.assert_called_once()
-        self.assertTrue(request_approval.call_args.kwargs["generated_in_memory"])
-        self.assertEqual(
-            request_approval.call_args.kwargs["display_path"],
-            "shell:pi-shell",
-        )
-        self.assertNotIn("one-command scripts are not allowed", result.output)
 
     def test_changed_bash_command_shows_full_review_without_snapshot_diff(self):
         key = run_mod.project_key("shell:pi-shell")

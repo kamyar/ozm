@@ -326,6 +326,63 @@ def _looks_like_script_path(value: str) -> bool:
     return lowered.endswith((".sh", ".bash", ".py", ".js", ".ts", ".rb"))
 
 
+def _has_unquoted_shell_expansion(line: str) -> bool:
+    quote = None
+    escaped = False
+    for index, char in enumerate(line):
+        if escaped:
+            escaped = False
+            continue
+        if quote == "'":
+            if char == "'":
+                quote = None
+            continue
+        if quote == '"':
+            if char == "\\":
+                escaped = True
+            elif char == '"':
+                quote = None
+            elif char in "$`":
+                return True
+            continue
+        if char == "\\":
+            escaped = True
+        elif char in "'\"":
+            quote = char
+        elif char in "$`*?[{":
+            return True
+        elif char == "~" and (index == 0 or line[index - 1].isspace()):
+            return True
+    return False
+
+
+def _generated_direct_command(lines: list[str]) -> str | None:
+    """Return the direct Ozm family when a shell is not required."""
+    if len(lines) != 1 or _has_unquoted_shell_expansion(lines[0]):
+        return None
+    tokens = _shell_tokens(lines[0])
+    if not tokens or any(
+        token and all(char in ";&|<>" for char in token)
+        for token in tokens
+    ):
+        return None
+    first = os.path.basename(tokens[0])
+    if (
+        first in {
+            ".", "alias", "break", "cd", "command", "continue", "eval",
+            "exec", "export", "read", "return", "set", "shift", "source",
+            "time", "trap", "umask", "unalias", "unset", "wait",
+        }
+        or re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=.*", tokens[0])
+    ):
+        return None
+    if first == "git":
+        return "git"
+    if first == "gh":
+        return "gh"
+    return "cmd"
+
+
 def _generated_simple_chain(lines: list[str]) -> bool:
     """Return true for generated shell content made of separate simple commands."""
     if not lines:
@@ -570,6 +627,21 @@ def _run_reviewed_script(
             "scripts that only invoke ozm are not allowed. Run each ozm "
             "command directly, one at a time, instead of opening a file for "
             "review. Direct commands can use normal automatic approvals.",
+            BLOCKED,
+        )
+    direct_family = (
+        _generated_direct_command(executable_lines)
+        if generated_shell
+        else None
+    )
+    if direct_family is not None:
+        reason = "run a shell-free command through its direct Ozm family"
+        log_review("blocked", reason)
+        _cleanup(cleanup_path)
+        raise click_error(
+            "generated shell content does not use shell-only behavior. Run it "
+            f"directly through 'ozm {direct_family}' so normal command policy "
+            "can apply without a shell approval.",
             BLOCKED,
         )
     if generated_shell and _generated_simple_chain(executable_lines):

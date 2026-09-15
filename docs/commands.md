@@ -37,7 +37,7 @@ print("hello")
 echo "hello"
 ```
 
-**Direct-command wrapper scripts are rejected.** The shebang, blank lines, and comment-only lines do not count as executable lines. If only one executable line remains, Ozm stops before cache and approval checks. Ozm also stops when every command segment invokes `ozm`. This applies to disk files, `ozm run --stdin`, and generated in-memory `shell:` files for input such as `ozm status && ozm tips`. Run each Ozm command directly and one at a time so normal automatic approvals can apply. Use `ozm run` only for scripts that contain real multi-step logic.
+**Direct-command wrapper scripts are rejected.** The shebang, blank lines, and comment-only lines do not count as executable lines. If only one executable line remains, Ozm stops before cache and approval checks. Ozm also stops when every command segment invokes `ozm`. This applies to disk files, `ozm run --stdin`, and generated in-memory `shell:` files for input such as `ozm status && ozm tips`. Run each Ozm command directly and one at a time so normal automatic approvals can apply. Use `ozm run` only for scripts that contain real multi-step logic. `ozm bash --command` also stops before approval when one command has no shell-only behavior. Run that command through the suggested `ozm cmd`, `ozm gh`, or `ozm git` family so normal command policy can apply.
 
 ### Flow
 
