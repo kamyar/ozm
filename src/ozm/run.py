@@ -17,6 +17,10 @@ from ozm.agent import extract_agent_metadata
 from ozm.approve import request_approval
 from ozm.audit import log as audit_log
 from ozm.exit_codes import BLOCKED, CONFIG_ERROR, DENIED, NO_DIALOG, click_error
+from ozm.command_routing import (
+    example_inspect_suggestion,
+    example_inspect_wrapper_args,
+)
 from ozm.config import project_key
 from ozm.output_filter import (
     misplaced_root_control,
@@ -552,6 +556,30 @@ def _run_reviewed_script(
             if detail:
                 feedback += f"; detail={detail}"
         audit_log(action, "run", audit_target, feedback)
+
+    example_inspect_args = None
+    if (
+        generated_shell
+        and len(executable_lines) == 1
+        and not _has_unquoted_shell_expansion(executable_lines[0])
+    ):
+        tokens = _shell_tokens(executable_lines[0])
+        if tokens and not any(
+            token and all(char in ";&|<>" for char in token)
+            for token in tokens
+        ):
+            example_inspect_args = example_inspect_wrapper_args(tokens)
+    if example_inspect_args is not None:
+        reason = "use the installed example_inspect CLI directly"
+        log_review("blocked", reason)
+        _cleanup(cleanup_path)
+        suggestion = example_inspect_suggestion(example_inspect_args, agent)
+        raise click_error(
+            "generated shell content uses an unnecessary Python or uv wrapper "
+            "for Example inspection. Re-run the installed CLI directly as: "
+            f"{suggestion}",
+            BLOCKED,
+        )
 
     leading_cwd = _generated_leading_cwd(executable_lines) if generated_shell else None
     if generated_shell and _generated_script_wrapper(executable_lines):

@@ -17,6 +17,10 @@ from ozm.agent import extract_agent_metadata
 from ozm.approve import request_cmd_approval, request_override
 from ozm.audit import log as audit_log
 from ozm.exit_codes import BLOCKED, CONFIG_ERROR, DENIED, NO_DIALOG, click_error
+from ozm.command_routing import (
+    example_inspect_suggestion,
+    example_inspect_wrapper_args,
+)
 from ozm.config import (
     _command_start_index,
     add_allowed_command,
@@ -567,6 +571,24 @@ def _cmd_impl(
             "--agent-name ... --agent-description ... <command>'.",
             BLOCKED,
         )
+
+    example_inspect_args = example_inspect_wrapper_args(args)
+    if example_inspect_args is not None:
+        command = shlex.join(args)
+        suggestion = example_inspect_suggestion(example_inspect_args, agent)
+        audit_log(
+            "blocked",
+            "cmd",
+            command,
+            "use the installed example_inspect CLI directly",
+        )
+        click.echo(
+            "ozm: Python and uv wrappers for Example inspection are not allowed. "
+            "Use the installed CLI entry point.",
+            err=True,
+        )
+        click.echo(f"ozm: re-run as: {suggestion}", err=True)
+        raise click_error("use the installed example_inspect CLI directly", BLOCKED)
 
     typed_operation = None
     if github_proxy:
