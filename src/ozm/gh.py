@@ -21,7 +21,8 @@ def gh_cmd(items: tuple[str, ...]) -> None:
     Proven read-only high-level commands, REST GET/HEAD requests, and GraphQL
     queries run directly. Use pr review-reply for typed review replies; the
     equivalent raw REST POST is rejected. Writes and unknown operations use the
-    normal command approval, blocklist, allowlist, and cache flow. The real gh
+    normal command approval, blocklist, allowlist, and cache flow. Use issue
+    create-batch for one aggregate review of a versioned issue manifest. The real gh
     executable is resolved from trusted system locations before execution.
     """
     _cmd_impl(False, ("gh", *items), github_proxy=True)

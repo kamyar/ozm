@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
+import json
 import os
 import re
 
@@ -18,6 +20,10 @@ _ADD_SUB_ISSUE_ENDPOINT = re.compile(
 _REPOSITORY = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 _VALUE_FLAGS = ("--repo", "--number", "--comment-id", "--body", "--body-file")
 _ADD_SUB_ISSUE_FLAGS = ("--repo", "--parent", "--sub-issue-id")
+_CREATE_BATCH_FLAGS = ("--repo", "--manifest")
+MAX_BATCH_ISSUES = 50
+MAX_BATCH_MANIFEST_BYTES = 256 * 1024
+MAX_ISSUE_BODY_BYTES = 1024 * 1024
 
 
 @dataclass(frozen=True)
@@ -97,6 +103,58 @@ class AddSubIssueOperation:
             "-F",
             f"sub_issue_id={self.sub_issue_id}",
         ]
+
+
+@dataclass(frozen=True)
+class IssueBatchItem:
+    title: str
+    labels: tuple[str, ...]
+    body_file: str
+    body: bytes
+
+    @property
+    def body_sha256(self) -> str:
+        return hashlib.sha256(self.body).hexdigest()
+
+
+@dataclass(frozen=True)
+class CreateIssuesBatchOperation:
+    repository: str
+    manifest: str
+    issues: tuple[IssueBatchItem, ...]
+
+    operation_name = "issue.create-batch"
+
+    def typed_args(self) -> list[str]:
+        return [
+            "issue",
+            "create-batch",
+            "--repo",
+            self.repository,
+            "--manifest",
+            self.manifest,
+        ]
+
+    def review_summary(self) -> str:
+        return json.dumps(
+            {
+                "operation": "github issue create-batch",
+                "repository": self.repository,
+                "manifest": self.manifest,
+                "issues": [
+                    {
+                        "title": issue.title,
+                        "labels": list(issue.labels),
+                        "body_file": issue.body_file,
+                        "body_sha256": issue.body_sha256,
+                        "body_bytes": len(issue.body),
+                    }
+                    for issue in self.issues
+                ],
+            },
+            indent=2,
+            sort_keys=True,
+        ) + "\n"
 
 
 def parse_review_reply(args: list[str]) -> ReviewReplyOperation | None:
@@ -230,10 +288,166 @@ def parse_add_sub_issue(args: list[str]) -> AddSubIssueOperation | None:
     )
 
 
+def parse_create_issues_batch(
+    args: list[str],
+) -> CreateIssuesBatchOperation | None:
+    """Parse and freeze one aggregate ``issue create-batch`` review."""
+    if args[:2] != ["issue", "create-batch"]:
+        return None
+
+    values: dict[str, str] = {}
+    index = 2
+    while index < len(args):
+        arg = args[index]
+        flag = None
+        value = None
+        for candidate in _CREATE_BATCH_FLAGS:
+            if arg == candidate:
+                flag = candidate
+                if index + 1 >= len(args):
+                    raise click.ClickException(f"{candidate} requires a value")
+                value = args[index + 1]
+                index += 2
+                break
+            if arg.startswith(candidate + "="):
+                flag = candidate
+                value = arg.split("=", 1)[1]
+                index += 1
+                break
+        if flag is None:
+            raise click.ClickException(
+                f"unsupported issue create-batch argument: {arg}"
+            )
+        if flag in values:
+            raise click.ClickException(f"{flag} must be specified once")
+        values[flag] = value or ""
+
+    missing = [flag for flag in _CREATE_BATCH_FLAGS if not values.get(flag)]
+    if missing:
+        raise click.ClickException(
+            "issue create-batch requires " + ", ".join(missing)
+        )
+    repository = values["--repo"]
+    if not _REPOSITORY.fullmatch(repository):
+        raise click.ClickException("--repo must use OWNER/REPOSITORY format")
+
+    manifest = os.path.abspath(values["--manifest"])
+    if os.path.islink(manifest) or not os.path.isfile(manifest):
+        raise click.ClickException(f"--manifest is not a regular file: {manifest}")
+    try:
+        with open(manifest, "rb") as file:
+            manifest_bytes = file.read(MAX_BATCH_MANIFEST_BYTES + 1)
+    except OSError as exc:
+        raise click.ClickException(f"could not read --manifest: {exc}") from exc
+    if len(manifest_bytes) > MAX_BATCH_MANIFEST_BYTES:
+        raise click.ClickException("--manifest exceeds the 256 KiB limit")
+    try:
+        payload = json.loads(manifest_bytes.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise click.ClickException(f"--manifest must be valid UTF-8 JSON: {exc}") from exc
+    if not isinstance(payload, dict) or set(payload) != {"version", "issues"}:
+        raise click.ClickException(
+            "--manifest must contain exactly version and issues"
+        )
+    if type(payload["version"]) is not int or payload["version"] != 1:
+        raise click.ClickException("--manifest version must be 1")
+    raw_issues = payload["issues"]
+    if not isinstance(raw_issues, list) or not 1 <= len(raw_issues) <= MAX_BATCH_ISSUES:
+        raise click.ClickException(
+            f"--manifest issues must contain 1 to {MAX_BATCH_ISSUES} entries"
+        )
+
+    issues = []
+    manifest_directory = os.path.dirname(manifest)
+    for issue_index, raw_issue in enumerate(raw_issues, 1):
+        if not isinstance(raw_issue, dict) or set(raw_issue) != {
+            "title", "body_file", "labels"
+        }:
+            raise click.ClickException(
+                f"issue {issue_index} must contain exactly title, body_file, and labels"
+            )
+        title = raw_issue["title"]
+        if (
+            not isinstance(title, str)
+            or not title.strip()
+            or title != title.strip()
+            or "\n" in title
+            or "\r" in title
+            or len(title) > 256
+        ):
+            raise click.ClickException(
+                f"issue {issue_index} title must be one non-empty line of at most 256 characters"
+            )
+        labels = raw_issue["labels"]
+        if (
+            not isinstance(labels, list)
+            or len(labels) > 20
+            or any(
+                not isinstance(label, str)
+                or not label
+                or label != label.strip()
+                or any(char in label for char in "\r\n\0")
+                or len(label) > 100
+                for label in labels
+            )
+        ):
+            raise click.ClickException(
+                f"issue {issue_index} labels must contain at most 20 non-empty strings"
+            )
+        body_source = raw_issue["body_file"]
+        if not isinstance(body_source, str) or not body_source:
+            raise click.ClickException(
+                f"issue {issue_index} body_file must be a non-empty path"
+            )
+        body_file = (
+            body_source
+            if os.path.isabs(body_source)
+            else os.path.join(manifest_directory, body_source)
+        )
+        body_file = os.path.abspath(body_file)
+        if os.path.islink(body_file) or not os.path.isfile(body_file):
+            raise click.ClickException(
+                f"issue {issue_index} body_file is not a regular file: {body_file}"
+            )
+        try:
+            with open(body_file, "rb") as file:
+                body = file.read(MAX_ISSUE_BODY_BYTES + 1)
+        except OSError as exc:
+            raise click.ClickException(
+                f"could not read issue {issue_index} body_file: {exc}"
+            ) from exc
+        if len(body) > MAX_ISSUE_BODY_BYTES:
+            raise click.ClickException(
+                f"issue {issue_index} body_file exceeds the 1 MiB limit"
+            )
+        try:
+            body.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise click.ClickException(
+                f"issue {issue_index} body_file must be UTF-8"
+            ) from exc
+        issues.append(IssueBatchItem(
+            title=title,
+            labels=tuple(dict.fromkeys(labels)),
+            body_file=body_file,
+            body=body,
+        ))
+
+    return CreateIssuesBatchOperation(
+        repository=repository,
+        manifest=manifest,
+        issues=tuple(issues),
+    )
+
+
 def parse_typed_operation(
     args: list[str],
-) -> ReviewReplyOperation | AddSubIssueOperation | None:
-    return parse_review_reply(args) or parse_add_sub_issue(args)
+) -> ReviewReplyOperation | AddSubIssueOperation | CreateIssuesBatchOperation | None:
+    return (
+        parse_review_reply(args)
+        or parse_add_sub_issue(args)
+        or parse_create_issues_batch(args)
+    )
 
 
 def match_raw_review_reply(args: list[str]) -> ReviewReplyOperation | None:
@@ -299,7 +513,9 @@ def github_operation_execution_args(args: list[str]) -> list[str] | None:
     if not args or args[0] != "gh":
         return None
     operation = parse_typed_operation(args[1:])
-    return operation.execution_args() if operation is not None else None
+    if operation is None or isinstance(operation, CreateIssuesBatchOperation):
+        return None
+    return operation.execution_args()
 
 
 def review_reply_execution_args(args: list[str]) -> list[str] | None:

@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 
+import json
+import os
 import subprocess
 import unittest
 from unittest.mock import ANY, patch
@@ -155,6 +157,191 @@ class AddSubIssueParserTests(unittest.TestCase):
         self.assertEqual(operation.repository, "example/widgets")
         self.assertEqual(operation.parent, 84)
         self.assertEqual(operation.sub_issue_id, 5278154076)
+
+
+class CreateIssuesBatchTests(unittest.TestCase):
+    def write_batch(self):
+        with open("first.md", "w") as file:
+            file.write("First body\n")
+        with open("second.md", "w") as file:
+            file.write("Second body\n")
+        manifest = {
+            "version": 1,
+            "issues": [
+                {
+                    "title": "First issue",
+                    "body_file": "first.md",
+                    "labels": ["parity", "priority/medium"],
+                },
+                {
+                    "title": "Second issue",
+                    "body_file": "second.md",
+                    "labels": [],
+                },
+            ],
+        }
+        with open("issues.json", "w") as file:
+            json.dump(manifest, file)
+        return os.path.abspath("issues.json")
+
+    def test_parser_freezes_body_content_and_builds_review_summary(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            manifest = self.write_batch()
+            operation = github_operations.parse_create_issues_batch([
+                "issue", "create-batch",
+                "--repo", "example/widgets",
+                "--manifest", manifest,
+            ])
+            with open("first.md", "w") as file:
+                file.write("Changed after parse\n")
+
+        self.assertEqual(operation.repository, "example/widgets")
+        self.assertEqual(len(operation.issues), 2)
+        self.assertEqual(operation.issues[0].body, b"First body\n")
+        summary = json.loads(operation.review_summary())
+        self.assertEqual(summary["issues"][0]["title"], "First issue")
+        self.assertEqual(
+            summary["issues"][0]["labels"],
+            ["parity", "priority/medium"],
+        )
+        self.assertEqual(len(summary["issues"][0]["body_sha256"]), 64)
+
+    def test_invalid_batch_manifests_fail_closed(self):
+        runner = CliRunner()
+        bad_payloads = [
+            {"version": 1, "issues": []},
+            {"version": 2, "issues": []},
+            {
+                "version": 1,
+                "issues": [{
+                    "title": "Bad\ntitle",
+                    "body_file": "body.md",
+                    "labels": [],
+                }],
+            },
+            {
+                "version": 1,
+                "issues": [{
+                    "title": "Missing body",
+                    "body_file": "missing.md",
+                    "labels": [],
+                }],
+            },
+        ]
+        for payload in bad_payloads:
+            with self.subTest(payload=payload), runner.isolated_filesystem():
+                with open("body.md", "w") as file:
+                    file.write("body\n")
+                with open("issues.json", "w") as file:
+                    json.dump(payload, file)
+                with self.assertRaises(Exception):
+                    github_operations.parse_create_issues_batch([
+                        "issue", "create-batch",
+                        "--repo", "example/widgets",
+                        "--manifest", "issues.json",
+                    ])
+
+    def test_one_aggregate_approval_executes_frozen_issue_bodies(self):
+        runner = CliRunner()
+        captured_bodies = []
+
+        def execute(args):
+            body_file = args[args.index("--body-file") + 1]
+            with open(body_file, "rb") as file:
+                captured_bodies.append(file.read())
+            return subprocess.CompletedProcess(args, 0)
+
+        with runner.isolated_filesystem():
+            manifest = self.write_batch()
+            with patch.object(cmd_mod, "is_command_blocked", return_value=None), \
+                 patch.object(
+                     cmd_mod,
+                     "request_approval",
+                     return_value=ApprovalResult(approved=True),
+                 ) as request_approval, \
+                 patch.object(cmd_mod, "request_cmd_approval") as request_cmd, \
+                 patch.object(cmd_mod, "github_operation_allowed") as operation_allowed, \
+                 patch.object(cmd_mod, "_run_command", side_effect=execute) as run_command, \
+                 patch.object(cmd_mod, "audit_log"):
+                result = runner.invoke(
+                    gh_mod.gh_cmd,
+                    [
+                        *META,
+                        "issue", "create-batch",
+                        "--repo", "example/widgets",
+                        "--manifest", manifest,
+                    ],
+                )
+
+        self.assertEqual(result.exit_code, 0, result.output)
+        request_approval.assert_called_once()
+        request_cmd.assert_not_called()
+        operation_allowed.assert_not_called()
+        self.assertEqual(run_command.call_count, 2)
+        self.assertEqual(captured_bodies, [b"First body\n", b"Second body\n"])
+        review = json.loads(request_approval.call_args.kwargs["content"])
+        self.assertEqual(len(review["issues"]), 2)
+        self.assertEqual(review["repository"], "example/widgets")
+
+    def test_batch_stops_and_reports_partial_failure(self):
+        runner = CliRunner()
+        results = [
+            subprocess.CompletedProcess([], 0),
+            subprocess.CompletedProcess([], 7),
+        ]
+        with runner.isolated_filesystem():
+            manifest = self.write_batch()
+            with patch.object(cmd_mod, "is_command_blocked", return_value=None), \
+                 patch.object(
+                     cmd_mod,
+                     "request_approval",
+                     return_value=ApprovalResult(approved=True),
+                 ), patch.object(
+                     cmd_mod,
+                     "_run_command",
+                     side_effect=results,
+                 ) as run_command, patch.object(cmd_mod, "audit_log") as audit_log:
+                result = runner.invoke(
+                    gh_mod.gh_cmd,
+                    [
+                        *META,
+                        "issue", "create-batch",
+                        "--repo", "example/widgets",
+                        "--manifest", manifest,
+                    ],
+                )
+
+        self.assertEqual(result.exit_code, 7, result.output)
+        self.assertEqual(run_command.call_count, 2)
+        self.assertIn("stopped after 1 of 2", result.output)
+        self.assertEqual(audit_log.call_args.args[0], "error")
+
+    def test_denied_batch_does_not_create_any_issue(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            manifest = self.write_batch()
+            with patch.object(cmd_mod, "is_command_blocked", return_value=None), \
+                 patch.object(
+                     cmd_mod,
+                     "request_approval",
+                     return_value=ApprovalResult(approved=False),
+                 ) as request_approval, \
+                 patch.object(cmd_mod, "_run_command") as run_command, \
+                 patch.object(cmd_mod, "audit_log"):
+                result = runner.invoke(
+                    gh_mod.gh_cmd,
+                    [
+                        *META,
+                        "issue", "create-batch",
+                        "--repo", "example/widgets",
+                        "--manifest", manifest,
+                    ],
+                )
+
+        self.assertEqual(result.exit_code, cmd_mod.DENIED, result.output)
+        request_approval.assert_called_once()
+        run_command.assert_not_called()
 
 
 class GitHubOperationConfigTests(unittest.TestCase):

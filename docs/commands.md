@@ -183,7 +183,24 @@ ozm gh --agent-name "Reply to review" --agent-description "Reply to one PR revie
 
 Use `ozm gh` instead of direct `gh` or `ozm cmd gh ...` commands. Ozm resolves the real `gh` executable from trusted system locations before execution. Known high-level reads, REST `GET` and `HEAD` requests, and proven GraphQL queries run directly. Writes and unknown operations continue through project/global blocklists, allowlists, the approval cache, and the approval dialog. Native proxy operations use `gh` as the audit kind, so they are distinct from generic `cmd` entries.
 
-`pr review-reply` validates `OWNER/REPOSITORY`, the pull-request number, the review-comment ID, and exactly one of `--body` or `--body-file`. `issue add-sub-issue` validates the repository, parent issue number, and GitHub numeric sub-issue database ID. Each typed operation uses a fixed endpoint. Configure exact repository authorization under `github.allowed_operations` to skip repeat approvals. Without that policy, typed writes retain normal approval. A matching raw `gh api -X POST repos/OWNER/REPOSITORY/pulls/NUMBER/comments/COMMENT_ID/replies ...` request is blocked before policy, cache, or approval checks. Ozm prints the equivalent typed command.
+`pr review-reply` validates `OWNER/REPOSITORY`, the pull-request number, the review-comment ID, and exactly one of `--body` or `--body-file`. `issue add-sub-issue` validates the repository, parent issue number, and GitHub numeric sub-issue database ID. `issue create-batch --repo OWNER/REPOSITORY --manifest FILE` reads a versioned JSON manifest, freezes every body file, and shows one aggregate review with every title, label, body path, size, and SHA-256. It always requires this batch review and does not add persistent authorization. Ozm creates issues sequentially after approval and reports a partial count if GitHub rejects a later issue. Each fixed typed operation uses a constrained execution form. Configure exact repository authorization under `github.allowed_operations` to skip repeat approvals. Without that policy, typed writes retain normal approval. A matching raw `gh api -X POST repos/OWNER/REPOSITORY/pulls/NUMBER/comments/COMMENT_ID/replies ...` request is blocked before policy, cache, or approval checks. Ozm prints the equivalent typed command.
+
+Batch manifest example:
+
+```json
+{
+  "version": 1,
+  "issues": [
+    {
+      "title": "Investigate widget behavior",
+      "body_file": "investigate-widget.md",
+      "labels": ["parity", "priority/medium"]
+    }
+  ]
+}
+```
+
+Relative body paths resolve from the manifest directory. A batch can contain 1 to 50 issues.
 
 To pass `--help` to the underlying GitHub CLI, use `ozm gh --agent-name "Read GitHub help" --agent-description "Show GitHub CLI help." -- --help`. A plain `ozm gh --help` shows proxy help.
 

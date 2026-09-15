@@ -14,7 +14,7 @@ import time
 import click
 
 from ozm.agent import extract_agent_metadata
-from ozm.approve import request_cmd_approval, request_override
+from ozm.approve import request_approval, request_cmd_approval, request_override
 from ozm.audit import log as audit_log
 from ozm.exit_codes import BLOCKED, CONFIG_ERROR, DENIED, NO_DIALOG, click_error
 from ozm.command_routing import (
@@ -40,6 +40,7 @@ from ozm.github_api import (
 )
 from ozm.github_operations import (
     AddSubIssueOperation,
+    CreateIssuesBatchOperation,
     ReviewReplyOperation,
     github_operation_execution_args,
     match_supported_raw_write,
@@ -508,7 +509,7 @@ def _reject_supported_raw_github_write(
 def _validate_github_proxy_args(
     args: list[str],
     agent,
-) -> ReviewReplyOperation | AddSubIssueOperation | None:
+) -> ReviewReplyOperation | AddSubIssueOperation | CreateIssuesBatchOperation | None:
     get_args = implicit_get_field_nudge(args)
     if get_args is not None:
         command = shlex.join(args)
@@ -546,6 +547,83 @@ def _reject_gh_via_cmd(args: list[str], agent) -> None:
     )
     click.echo(f"ozm: re-run as: {suggestion}", err=True)
     raise click_error("use the native 'ozm gh' command", BLOCKED)
+
+
+def _review_and_execute_issue_batch(
+    operation: CreateIssuesBatchOperation,
+    agent,
+    command: str,
+) -> None:
+    approval = request_approval(
+        operation.manifest,
+        "REVIEW",
+        agent,
+        content=operation.review_summary(),
+        display_path=(
+            f"github:{operation.repository}:issue-create-batch"
+        ),
+        generated_in_memory=True,
+    )
+    if approval.approved is False:
+        audit_log("denied", "gh", command, approval.feedback)
+        click.echo("ozm: denied GitHub issue creation batch", err=True)
+        sys.exit(DENIED)
+    if approval.approved is not True:
+        audit_log("no-dialog", "gh", command, approval.feedback)
+        raise click_error(
+            "GitHub issue batch approval dialog could not be displayed",
+            NO_DIALOG,
+        )
+
+    completed = 0
+    for issue in operation.issues:
+        fd, body_snapshot = tempfile.mkstemp(
+            prefix="ozm-issue-body-",
+            suffix=".md",
+        )
+        try:
+            with os.fdopen(fd, "wb") as file:
+                file.write(issue.body)
+            execution_args = [
+                "gh",
+                "issue",
+                "create",
+                "--repo",
+                operation.repository,
+                "--title",
+                issue.title,
+                "--body-file",
+                body_snapshot,
+            ]
+            for label in issue.labels:
+                execution_args.extend(["--label", label])
+            result = _run_command(execution_args)
+        finally:
+            try:
+                os.unlink(body_snapshot)
+            except OSError:
+                pass
+        if result.returncode != 0:
+            audit_log(
+                "error",
+                "gh",
+                command,
+                f"issue batch stopped after {completed} of {len(operation.issues)} creations",
+            )
+            click.echo(
+                "ozm: issue batch stopped after "
+                f"{completed} of {len(operation.issues)} creations",
+                err=True,
+            )
+            sys.exit(result.returncode)
+        completed += 1
+
+    detail = f"created {completed} issues for {operation.repository}"
+    if approval.feedback:
+        detail += f"; user feedback: {approval.feedback}"
+    audit_log("clicked", "gh", command, detail)
+    click.echo(f"ozm: approved GitHub issue batch; {detail}", err=True)
+    sys.exit(0)
 
 
 def _cmd_impl(
@@ -755,6 +833,9 @@ def _cmd_impl(
             audit_log("denied", audit_kind, command, approval.feedback)
             click.echo("ozm: override denied", err=True)
             sys.exit(DENIED)
+
+    if isinstance(typed_operation, CreateIssuesBatchOperation):
+        _review_and_execute_issue_batch(typed_operation, agent, command)
 
     if typed_operation is not None:
         try:
