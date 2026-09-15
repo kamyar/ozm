@@ -199,7 +199,8 @@ TIPS = [
     "with 'ozm run <script>'. Do not batch only ozm commands in a file or "
     "generated shell snippet; invoke each ozm command directly and separately.",
     "Prefer proven read-only operations. Ozm recognizes conservative forms of command -v, "
-    "bazel query, brew search, npm view, and npm list without approval. Reach "
+    "bazel query, brew search, npm view, npm list, trusted Pi metadata, trusted tool help, "
+    "and trusted disk-usage commands without approval. Reach "
     "for rg, cat, nl, head, tail, ls, and git status/log/diff first.",
     "Avoid complex commands. Use root-level '--grep TERM' and '--head N' "
     "options to filter command stdout without a shell pipeline. Repeat grep "

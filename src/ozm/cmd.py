@@ -46,6 +46,22 @@ CMD_PREFIX = "cmd:"
 RECENT_CHMOD_WINDOW_SECONDS = 10 * 60
 CONFIRM_RECENT_CHMOD_FLAG = "--confirm-recent-chmod"
 SAFE_READ_ONLY_COMMANDS = {"echo", "printf", "pwd", "date", "true", "false", "test"}
+SAFE_PI_ENVIRONMENT_VARIABLES = {
+    "PI_AGENT_MODEL",
+    "PI_MODEL",
+    "PI_PROVIDER",
+    "PI_SESSION_DIR",
+    "PI_SESSION_ID",
+}
+SAFE_GO_ENVIRONMENT_VARIABLES = {
+    "GOARCH",
+    "GOMOD",
+    "GOMODCACHE",
+    "GOOS",
+    "GOPATH",
+    "GOROOT",
+    "GOVERSION",
+}
 _CHMOD_SHORT_OPTIONS = frozenset("cfhRvHLP")
 
 
@@ -57,8 +73,19 @@ def _scope_label(global_scope: bool) -> str:
     return "global" if global_scope else "project"
 
 
-def _run_command(argv: list[str]) -> subprocess.CompletedProcess:
+def _run_command(
+    argv: list[str],
+    *,
+    trusted_first: bool = False,
+) -> subprocess.CompletedProcess:
     execution_argv = list(argv)
+    if trusted_first and execution_argv:
+        executable = trusted_executable(os.path.basename(execution_argv[0]))
+        if executable is None:
+            raise click.ClickException(
+                f"trusted {os.path.basename(execution_argv[0])} executable was not found"
+            )
+        execution_argv[0] = executable
     typed_github_argv = github_operation_execution_args(execution_argv)
     if typed_github_argv is not None:
         execution_argv = typed_github_argv
@@ -103,6 +130,60 @@ def _builtin_read_only_reason(args: list[str]) -> str | None:
         return "brew search"
     if command == "npm" and rest and rest[0] in ("view", "list"):
         return f"npm {rest[0]}"
+    return None
+
+
+def _trusted_read_only_reason(args: list[str]) -> str | None:
+    """Return a reason for exact read forms of trusted installed tools."""
+    if not args:
+        return None
+    command = os.path.basename(args[0])
+    rest = args[1:]
+    executable = trusted_executable(command)
+    if executable is None:
+        return None
+    if os.path.sep in args[0] and os.path.realpath(args[0]) != os.path.realpath(executable):
+        return None
+
+    if command == "pi":
+        if rest in (["--help"], ["--version"], ["list"], ["models", "--help"], ["config", "--help"]):
+            return "trusted pi metadata"
+        if rest[:1] == ["--list-models"] and len(rest) <= 2:
+            if len(rest) == 1 or not rest[1].startswith("-"):
+                return "trusted pi model list"
+        return None
+    if command == "df":
+        return "trusted filesystem usage"
+    if command == "docker":
+        if rest[:2] == ["system", "df"]:
+            return "trusted docker disk usage"
+        if rest in (
+            ["--help"],
+            ["builder", "prune", "--help"],
+            ["image", "prune", "--help"],
+            ["system", "--help"],
+        ):
+            return "trusted docker help"
+        return None
+    if command == "bazel" and rest[:1] == ["help"]:
+        return "trusted bazel help"
+    if command == "orb" and rest == ["--help"]:
+        return "trusted orb help"
+    if command == "orbctl" and rest in (["--help"], ["docker", "--help"]):
+        return "trusted orbctl help"
+    if (
+        command == "go"
+        and rest[:1] == ["env"]
+        and len(rest) >= 2
+        and all(item in SAFE_GO_ENVIRONMENT_VARIABLES for item in rest[1:])
+    ):
+        return "trusted go environment metadata"
+    if (
+        command == "printenv"
+        and len(rest) == 1
+        and rest[0] in SAFE_PI_ENVIRONMENT_VARIABLES
+    ):
+        return "trusted Pi environment metadata"
     return None
 
 
@@ -634,6 +715,10 @@ def _cmd_impl(
             sys.exit(result.returncode)
 
     semantic_reason = _builtin_read_only_reason(args)
+    trusted_semantic = False
+    if not semantic_reason:
+        semantic_reason = _trusted_read_only_reason(args)
+        trusted_semantic = semantic_reason is not None
     if not semantic_reason:
         semantic_reason = _safe_read_only_reason(command)
     if not semantic_reason:
@@ -641,7 +726,11 @@ def _cmd_impl(
     if semantic_reason:
         audit_log("semantic", audit_kind, command, semantic_reason)
         click.echo(f"ozm: allowed ({semantic_reason})", err=True)
-        result = _run_command(args)
+        result = (
+            _run_command(args, trusted_first=True)
+            if trusted_semantic
+            else _run_command(args)
+        )
         sys.exit(result.returncode)
 
     try:
