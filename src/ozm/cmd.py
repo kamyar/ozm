@@ -38,7 +38,11 @@ from ozm.github_operations import (
     match_supported_raw_write,
     parse_typed_operation,
 )
-from ozm.output_filter import output_filter_active, run_with_output_filter
+from ozm.output_filter import (
+    misplaced_root_control,
+    output_filter_active,
+    run_with_output_filter,
+)
 from ozm.paths import trusted_executable
 from ozm.run import load_hashes, save_hashes
 
@@ -545,6 +549,24 @@ def _cmd_impl(
             reason = a.split("=", 1)[1]
             args.pop(i)
             break
+
+    family_args = args[1:] if github_proxy and args[:1] == ["gh"] else args
+    misplaced_control = misplaced_root_control(family_args)
+    if misplaced_control is not None:
+        command = shlex.join(args)
+        kind = "gh" if github_proxy else "cmd"
+        audit_log(
+            "blocked",
+            kind,
+            command,
+            f"put root {misplaced_control} before the Ozm command family",
+        )
+        raise click_error(
+            f"{misplaced_control} is an Ozm root control. Put it before "
+            f"'{kind}', for example 'ozm {misplaced_control} ... {kind} "
+            "--agent-name ... --agent-description ... <command>'.",
+            BLOCKED,
+        )
 
     typed_operation = None
     if github_proxy:

@@ -11,6 +11,20 @@ from typing import Any
 import click
 
 
+ROOT_CONTROLS_WITH_VALUE = ("--cwd", "--grep", "--head", "--tail")
+
+
+def misplaced_root_control(args: list[str]) -> str | None:
+    """Return a root control incorrectly placed where a command must start."""
+    if not args:
+        return None
+    first = args[0]
+    for control in ROOT_CONTROLS_WITH_VALUE:
+        if first == control or first.startswith(control + "="):
+            return control
+    return None
+
+
 def current_grep_terms() -> tuple[str, ...]:
     """Return root-level literal grep terms for the active Click command."""
     context = click.get_current_context(silent=True)

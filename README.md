@@ -98,7 +98,7 @@ Scripts must have a shebang, but the source file does not need an executable fil
 
 ### Shell-free location and output controls
 
-Put root options before the command family. Use `--cwd DIRECTORY` instead of a shell `cd` wrapper. Repeat `--grep TERM` to show stdout lines that contain any selected literal term. Use `--head N` or `--tail N` to select leading or trailing filtered lines:
+Put root options before the command family. Ozm rejects misplaced root controls before approval and shows the correct placement. Use `--cwd DIRECTORY` instead of a shell `cd` wrapper. Repeat `--grep TERM` to show stdout lines that contain any selected literal term. Use `--head N` or `--tail N` to select leading or trailing filtered lines:
 
 ```bash
 ozm --cwd /path/to/worktree --grep "projection" --grep "coverage" --head 20 git --agent-name "Inspect main" --agent-description "Find projection and coverage code on main." show origin/main:path/to/config.go

@@ -10,6 +10,7 @@ from click.testing import CliRunner
 from ozm import cli as cli_mod
 from ozm import cmd as cmd_mod
 from ozm import git as git_mod
+from ozm import gh as gh_mod
 from ozm import run as run_mod
 from ozm.approve import ApprovalResult
 
@@ -212,6 +213,51 @@ class GlobalOutputFilterTests(unittest.TestCase):
         self.assertEqual(seen_cwd, child)
         self.assertNotEqual(restored_cwd, child)
         self.assertEqual(os.getcwd(), original_cwd)
+
+    def test_cmd_rejects_a_misplaced_root_control_before_approval(self):
+        with patch.object(cmd_mod, "request_cmd_approval") as request_approval, \
+             patch.object(cmd_mod, "audit_log"):
+            result = CliRunner().invoke(
+                cli_mod.cli,
+                ["cmd", *META, "--grep", "portkey", "pi", "--list-models"],
+            )
+
+        self.assertEqual(result.exit_code, cmd_mod.BLOCKED, result.output)
+        self.assertIn("root control", result.output)
+        self.assertIn("before 'cmd'", result.output)
+        request_approval.assert_not_called()
+
+    def test_gh_rejects_a_misplaced_root_control_before_approval(self):
+        with patch.object(cmd_mod, "request_cmd_approval") as request_approval, \
+             patch.object(cmd_mod, "audit_log"):
+            result = CliRunner().invoke(
+                cli_mod.cli,
+                ["gh", *META, "--tail", "20", "pr", "view", "42"],
+            )
+
+        self.assertEqual(result.exit_code, cmd_mod.BLOCKED, result.output)
+        self.assertIn("before 'gh'", result.output)
+        request_approval.assert_not_called()
+
+    def test_git_rejects_a_misplaced_root_control(self):
+        with patch.object(git_mod, "audit_log"):
+            result = CliRunner().invoke(
+                cli_mod.cli,
+                ["git", *META, "--cwd", "/tmp", "status"],
+            )
+
+        self.assertEqual(result.exit_code, git_mod.BLOCKED, result.output)
+        self.assertIn("before 'git'", result.output)
+
+    def test_run_rejects_a_misplaced_root_control(self):
+        with patch.object(run_mod, "audit_log"):
+            result = CliRunner().invoke(
+                cli_mod.cli,
+                ["run", *META, "--head", "20", "script.sh"],
+            )
+
+        self.assertEqual(result.exit_code, run_mod.BLOCKED, result.output)
+        self.assertIn("before 'run'", result.output)
 
     def test_global_grep_rejects_an_empty_term(self):
         result = CliRunner().invoke(

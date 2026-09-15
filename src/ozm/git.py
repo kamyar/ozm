@@ -13,7 +13,11 @@ from ozm.approve import request_override
 from ozm.audit import log as audit_log
 from ozm.config import commit_config
 from ozm.exit_codes import BLOCKED, DENIED, NO_DIALOG
-from ozm.output_filter import output_filter_active, run_with_output_filter
+from ozm.output_filter import (
+    misplaced_root_control,
+    output_filter_active,
+    run_with_output_filter,
+)
 from ozm.paths import trusted_executable
 
 MAX_SUBJECT_LENGTH = 72
@@ -387,6 +391,23 @@ def _handle_violation(
 def git_cmd(args: tuple[str, ...]) -> None:
     """Git pass-through. Enforces rules on commit and push."""
     args_list, agent = extract_agent_metadata(list(args))
+    misplaced_control = misplaced_root_control(args_list)
+    if misplaced_control is not None:
+        command = _git_command(args_list)
+        audit_log(
+            "blocked",
+            "git",
+            command,
+            f"put root {misplaced_control} before the Ozm command family",
+        )
+        click.echo(
+            f"ozm: {misplaced_control} is an Ozm root control. Put it before "
+            "'git', for example 'ozm "
+            f"{misplaced_control} ... git --agent-name ... "
+            "--agent-description ... <git-args>'.",
+            err=True,
+        )
+        sys.exit(BLOCKED)
     if not args_list:
         result = _run_git([_git_binary()])
         sys.exit(result.returncode)

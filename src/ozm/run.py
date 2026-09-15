@@ -18,7 +18,11 @@ from ozm.approve import request_approval
 from ozm.audit import log as audit_log
 from ozm.exit_codes import BLOCKED, CONFIG_ERROR, DENIED, NO_DIALOG, click_error
 from ozm.config import project_key
-from ozm.output_filter import output_filter_active, run_with_output_filter
+from ozm.output_filter import (
+    misplaced_root_control,
+    output_filter_active,
+    run_with_output_filter,
+)
 from ozm.storage import (
     ensure_private_dir,
     load_yaml_no_follow,
@@ -805,6 +809,21 @@ def run_cmd(from_stdin: bool, title: str | None, items: tuple[str, ...]) -> None
     also rejected; run each ozm command directly and separately.
     """
     parts, agent = extract_agent_metadata(list(items))
+    misplaced_control = misplaced_root_control(parts)
+    if misplaced_control is not None:
+        command = shlex.join(parts)
+        audit_log(
+            "blocked",
+            "run",
+            command,
+            f"put root {misplaced_control} before the Ozm command family",
+        )
+        raise click_error(
+            f"{misplaced_control} is an Ozm root control. Put it before 'run', "
+            f"for example 'ozm {misplaced_control} ... run --agent-name ... "
+            "--agent-description ... <script>'.",
+            BLOCKED,
+        )
     if from_stdin:
         run_stdin_content(sys.stdin.read(), tuple(parts), agent, title=title)
         return
