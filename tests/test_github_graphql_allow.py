@@ -110,6 +110,40 @@ mutation UpdateIssue {
         load_hashes.assert_not_called()
         run_command.assert_called_once_with(args)
 
+    def test_inline_fragments_and_enum_lists_remain_read_only(self):
+        document = """
+query query {
+  repository(owner: "example", name: "widgets") {
+    issue(number: 472789) {
+      subIssues(first: 100) {
+        nodes {
+          number
+          timelineItems(first: 100, itemTypes: [CONNECTED_EVENT, CROSS_REFERENCED_EVENT]) {
+            nodes {
+              __typename
+              ... on CrossReferencedEvent {
+                source {
+                  ... on Issue { number title state url }
+                  ... on PullRequest { number title state url mergedAt }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+""".strip()
+        args = ["gh", "api", "graphql", "-f", f"query={document}"]
+
+        result, _blocked, _allowed, load_hashes, request_approval, run_command, _audit_log = self.run_cmd(args)
+
+        self.assertEqual(result.exit_code, 0, result.output)
+        request_approval.assert_not_called()
+        load_hashes.assert_not_called()
+        run_command.assert_called_once_with(args)
+
     def test_github_graphql_mutation_still_requires_approval(self):
         mutation = """
 mutation AddComment {

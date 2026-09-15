@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 
 from ozm.github_graphql import read_only_reason as graphql_read_only_reason
 
@@ -35,6 +36,10 @@ _UNSAFE_HEADER_NAMES = frozenset({
     "x-http-method-override",
     "x-method-override",
 })
+_IMPLICIT_GET_FIELD_ENDPOINTS = (
+    re.compile(r"^search/(?:code|commits|issues|labels|repositories|topics|users)$"),
+    re.compile(r"^repos/[^/]+/[^/]+/git/trees/[^/]+$"),
+)
 _HIGH_LEVEL_READ_COMMANDS = frozenset({
     ("auth", "status"),
     ("issue", "list"),
@@ -88,6 +93,24 @@ def read_only_reason(args: list[str]) -> str | None:
     if request is None or request.method not in REST_READ_ONLY_METHODS:
         return None
     return f"github rest {request.method}"
+
+
+def implicit_get_field_nudge(args: list[str]) -> list[str] | None:
+    """Return argv with explicit GET for proven GET-only field endpoints."""
+    request = extract_rest_request(args)
+    if request is None or request.method != "POST":
+        return None
+    if any(
+        arg in _METHOD_FLAGS
+        or arg.startswith("--method=")
+        or (arg.startswith("-X") and arg != "-X")
+        for arg in args[2:]
+    ):
+        return None
+    endpoint = request.endpoint.lstrip("/").split("?", 1)[0]
+    if not any(pattern.fullmatch(endpoint) for pattern in _IMPLICIT_GET_FIELD_ENDPOINTS):
+        return None
+    return ["gh", "api", "--method", "GET", *args[2:]]
 
 
 def high_level_read_only_reason(args: list[str]) -> str | None:

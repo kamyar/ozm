@@ -34,7 +34,10 @@ from ozm.config import (
     is_command_blocked,
     project_key,
 )
-from ozm.github_api import read_only_reason as github_api_read_only_reason
+from ozm.github_api import (
+    implicit_get_field_nudge,
+    read_only_reason as github_api_read_only_reason,
+)
 from ozm.github_operations import (
     AddSubIssueOperation,
     ReviewReplyOperation,
@@ -506,6 +509,23 @@ def _validate_github_proxy_args(
     args: list[str],
     agent,
 ) -> ReviewReplyOperation | AddSubIssueOperation | None:
+    get_args = implicit_get_field_nudge(args)
+    if get_args is not None:
+        command = shlex.join(args)
+        suggestion = _native_gh_suggestion(agent, get_args[1:])
+        audit_log(
+            "blocked",
+            "gh",
+            command,
+            "explicit GET required for REST fields on a read endpoint",
+        )
+        click.echo(
+            "ozm: GitHub CLI fields default this read endpoint to POST. "
+            "Specify GET so Ozm can prove that it is read-only.",
+            err=True,
+        )
+        click.echo(f"ozm: re-run as: {suggestion}", err=True)
+        raise click_error("use explicit GET for this GitHub read", BLOCKED)
     _reject_supported_raw_github_write(args, agent, audit_kind="gh")
     if args and args[0] == "gh":
         return parse_typed_operation(args[1:])

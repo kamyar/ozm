@@ -57,6 +57,42 @@ class GitHubRESTParserTests(unittest.TestCase):
         self.assertEqual(request.method, "GET")
         self.assertEqual(github_api.read_only_reason(args), "github rest GET")
 
+    def test_get_only_field_endpoints_receive_an_explicit_get_nudge(self):
+        cases = [
+            ["gh", "api", "search/code", "-f", "q=needle org:example"],
+            [
+                "gh", "api", "repos/example/repo/git/trees/main",
+                "-f", "recursive=1",
+            ],
+        ]
+        for args in cases:
+            with self.subTest(args=args):
+                nudged = github_api.implicit_get_field_nudge(args)
+                self.assertEqual(nudged[:4], ["gh", "api", "--method", "GET"])
+                self.assertEqual(
+                    github_api.read_only_reason(nudged),
+                    "github rest GET",
+                )
+
+    def test_write_and_explicit_method_endpoints_do_not_receive_get_nudge(self):
+        cases = [
+            [
+                "gh", "api", "repos/example/repo/issues/1/comments",
+                "-f", "body=hello",
+            ],
+            [
+                "gh", "api", "--method", "POST", "search/code",
+                "-f", "q=needle org:example",
+            ],
+            [
+                "gh", "api", "--method", "GET", "search/code",
+                "-f", "q=needle org:example",
+            ],
+        ]
+        for args in cases:
+            with self.subTest(args=args):
+                self.assertIsNone(github_api.implicit_get_field_nudge(args))
+
     def test_body_fields_default_to_post(self):
         args = [
             "gh", "api", "repos/example/widgets/issues/123/comments",
@@ -182,6 +218,21 @@ class GitHubRESTReadAutoAllowTests(unittest.TestCase):
             shlex.join(args),
             "github api help",
         )
+
+    def test_implicit_post_to_get_only_endpoint_is_blocked_with_get_nudge(self):
+        args = [
+            "gh", "api", "search/code",
+            "-f", "q=widget_id org:example",
+            "--jq", ".items[].path",
+        ]
+
+        result, _blocked, _allowed, _load_hashes, request_approval, run_command, _audit_log = self.run_cmd(args)
+
+        self.assertEqual(result.exit_code, cmd_mod.BLOCKED, result.output)
+        request_approval.assert_not_called()
+        run_command.assert_not_called()
+        self.assertIn("fields default this read endpoint to POST", result.output)
+        self.assertIn("--method GET", result.output)
 
     def test_supported_rest_write_is_blocked_with_typed_nudge(self):
         args = [
