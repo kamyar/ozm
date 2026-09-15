@@ -4,6 +4,7 @@ ozm keeps runtime configuration outside the repo, where agents can't silently ac
 
 - `~/.ozm/config.yaml` for global command allowlists and blocklists
 - `~/.ozm/projects/<name>-<hash>.yaml` for project command rules and commit rules
+- `~/.ozm/rule-packs/<name>.yaml` for explicitly enabled private tool routing
 
 The in-repo `.ozm.yaml` is never read at runtime. It serves as a template: run `ozm trust` to snapshot it into `~/.ozm/projects/`, where it becomes the active config. This is a security boundary — agents can edit `.ozm.yaml` all they want, but it has no effect until a human explicitly trusts it.
 
@@ -82,6 +83,34 @@ blocked_commands:
 ```
 
 Use global rules for commands that are safe across projects. Use project rules for commands whose safety depends on a repository, environment, or service. Within the same action, project rules are checked before global rules, but every blocklist always wins over every allowlist.
+
+### Private rule packs
+
+Keep employer-private tool names and wrapper forms outside the public Ozm repository. Store them in a data-only rule pack under `~/.ozm/rule-packs/`, then enable the pack by name from `~/.ozm/config.yaml` or the user-owned project config:
+
+```yaml
+rule_packs:
+  - work
+```
+
+Example `~/.ozm/rule-packs/work.yaml`:
+
+```yaml
+version: 1
+description: Private installed tools.
+entrypoint_redirects:
+  - id: example-inspect-entrypoint
+    target: example-inspect
+    python_modules:
+      - example_inspect
+    script_basenames:
+      - example-inspect.py
+    guidance: Invoke the installed example inspection entry point directly.
+```
+
+A redirect detects direct script, Python module, and uv-wrapped Python module forms. It stops before approval and prints the direct `ozm cmd` form. It does not authorize the target. Add target authorization separately to `allowed_commands` only when appropriate.
+
+Pack names cannot contain paths. Ozm never discovers packs in a repository. Enabled packs load only from the private Ozm directory. Missing packs, symlinks, unsupported versions, unknown fields, and malformed rules fail closed before command execution.
 
 ### Typed GitHub operations
 

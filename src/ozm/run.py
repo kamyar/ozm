@@ -18,8 +18,8 @@ from ozm.approve import request_approval
 from ozm.audit import log as audit_log
 from ozm.exit_codes import BLOCKED, CONFIG_ERROR, DENIED, NO_DIALOG, click_error
 from ozm.command_routing import (
-    example_inspect_suggestion,
-    example_inspect_wrapper_args,
+    configured_entrypoint_redirect,
+    entrypoint_suggestion,
 )
 from ozm.config import project_key
 from ozm.output_filter import (
@@ -27,6 +27,7 @@ from ozm.output_filter import (
     output_filter_active,
     run_with_output_filter,
 )
+from ozm.rule_packs import load_entrypoint_redirects
 from ozm.storage import (
     ensure_private_dir,
     load_yaml_no_follow,
@@ -244,6 +245,24 @@ def _shell_tokens(line: str) -> list[str] | None:
         return list(lexer)
     except ValueError:
         return None
+
+
+def _shell_command_segments(lines: list[str]) -> list[list[str]]:
+    """Return static command segments for block-only local routing checks."""
+    segments: list[list[str]] = []
+    for line in lines:
+        tokens = _shell_tokens(line)
+        if not tokens:
+            continue
+        segment: list[str] = []
+        for token in [*tokens, ";"]:
+            if token and all(char in ";&|<>" for char in token):
+                if segment:
+                    segments.append(segment)
+                segment = []
+            else:
+                segment.append(token)
+    return segments
 
 
 def _ozm_true_operator(lines: list[str]) -> str | None:
@@ -557,27 +576,36 @@ def _run_reviewed_script(
                 feedback += f"; detail={detail}"
         audit_log(action, "run", audit_target, feedback)
 
-    example_inspect_args = None
-    if (
-        generated_shell
-        and len(executable_lines) == 1
-        and not _has_unquoted_shell_expansion(executable_lines[0])
-    ):
-        tokens = _shell_tokens(executable_lines[0])
-        if tokens and not any(
-            token and all(char in ";&|<>" for char in token)
-            for token in tokens
-        ):
-            example_inspect_args = example_inspect_wrapper_args(tokens)
-    if example_inspect_args is not None:
-        reason = "use the installed example_inspect CLI directly"
+    entrypoint_redirect = None
+    if generated_shell:
+        try:
+            redirect_rules = load_entrypoint_redirects()
+        except (OSError, RuntimeError) as exc:
+            log_review("error", f"rule pack error: {exc}")
+            _cleanup(cleanup_path)
+            raise click_error(
+                f"rule pack error: {exc}. The command was NOT executed.",
+                CONFIG_ERROR,
+            ) from exc
+        for segment in _shell_command_segments(executable_lines):
+            entrypoint_redirect = configured_entrypoint_redirect(
+                segment,
+                rules=redirect_rules,
+            )
+            if entrypoint_redirect is not None:
+                break
+    if entrypoint_redirect is not None:
+        reason = (
+            f"local rule {entrypoint_redirect.qualified_id}: use "
+            f"{entrypoint_redirect.rule.target} directly"
+        )
         log_review("blocked", reason)
         _cleanup(cleanup_path)
-        suggestion = example_inspect_suggestion(example_inspect_args, agent)
+        suggestion = entrypoint_suggestion(entrypoint_redirect, agent)
         raise click_error(
-            "generated shell content uses an unnecessary Python or uv wrapper "
-            "for Example inspection. Re-run the installed CLI directly as: "
-            f"{suggestion}",
+            "generated shell content uses a wrapper blocked by local rule "
+            f"'{entrypoint_redirect.qualified_id}'. "
+            f"{entrypoint_redirect.rule.guidance} Re-run as: {suggestion}",
             BLOCKED,
         )
 

@@ -105,7 +105,7 @@ $ ozm cmd --agent-name "Start services" --agent-description "Bring the local Doc
 
 **Built-in semantic reads:** Exact conservative forms of `command -v`, `bazel query`, `brew search`, `npm view`, and `npm list` run before allowlist, cache, and approval checks. Ozm also recognizes exact trusted forms for Pi metadata and model lists, filesystem and container disk usage, selected tool help, selected `go env` keys, and non-secret Pi metadata variables. It resolves these tools from trusted system locations before execution. Write-capable variants such as `pi update`, Docker prune without `--help`, `go env -w`, and secret-bearing `printenv` remain reviewed. `bazel query --output_file` and unknown forms are not semantic reads. `gh api --help` is also a local semantic read.
 
-**Script and entry-point detection:** If Ozm detects a Python or uv wrapper for Example inspection, it stops before approval and prints the direct CLI form. If Ozm detects another direct script, interpreter script, or wrapper-based script (for example, `ozm cmd poll.sh`, `ozm cmd python script.py`, or `ozm cmd uv run script.py`), it stops before policy, cache, and approval checks. The `ozm run` suggestion preserves script arguments. Extensionless files with a shebang are also detected. This ensures script content uses review and the content hash cache.
+**Script and entry-point detection:** If an enabled private rule pack detects a configured Python, uv, or script wrapper, Ozm stops before approval and prints the configured installed entry point. If Ozm detects another direct script, interpreter script, or wrapper-based script (for example, `ozm cmd poll.sh`, `ozm cmd python script.py`, or `ozm cmd uv run script.py`), it stops before policy, cache, and approval checks. The `ozm run` suggestion preserves script arguments. Extensionless files with a shebang are also detected. This ensures script content uses review and the content hash cache.
 
 ```
 $ ozm cmd --agent-name "Run script" --agent-description "Try to execute a Python script." python myscript.py
@@ -194,7 +194,7 @@ Batch manifest example:
     {
       "title": "Investigate widget behavior",
       "body_file": "investigate-widget.md",
-      "labels": ["parity", "priority/medium"]
+      "labels": ["bug", "priority/medium"]
     }
   ]
 }

@@ -171,7 +171,7 @@ class CreateIssuesBatchTests(unittest.TestCase):
                 {
                     "title": "First issue",
                     "body_file": "first.md",
-                    "labels": ["parity", "priority/medium"],
+                    "labels": ["bug", "priority/medium"],
                 },
                 {
                     "title": "Second issue",
@@ -203,7 +203,7 @@ class CreateIssuesBatchTests(unittest.TestCase):
         self.assertEqual(summary["issues"][0]["title"], "First issue")
         self.assertEqual(
             summary["issues"][0]["labels"],
-            ["parity", "priority/medium"],
+            ["bug", "priority/medium"],
         )
         self.assertEqual(len(summary["issues"][0]["body_sha256"]), 64)
 

@@ -18,8 +18,8 @@ from ozm.approve import request_approval, request_cmd_approval, request_override
 from ozm.audit import log as audit_log
 from ozm.exit_codes import BLOCKED, CONFIG_ERROR, DENIED, NO_DIALOG, click_error
 from ozm.command_routing import (
-    example_inspect_suggestion,
-    example_inspect_wrapper_args,
+    configured_entrypoint_redirect,
+    entrypoint_suggestion,
 )
 from ozm.config import (
     _command_start_index,
@@ -670,23 +670,34 @@ def _cmd_impl(
             BLOCKED,
         )
 
-    example_inspect_args = example_inspect_wrapper_args(args)
-    if example_inspect_args is not None:
+    try:
+        entrypoint_redirect = configured_entrypoint_redirect(args)
+    except (OSError, RuntimeError) as exc:
         command = shlex.join(args)
-        suggestion = example_inspect_suggestion(example_inspect_args, agent)
-        audit_log(
-            "blocked",
-            "cmd",
-            command,
-            "use the installed example_inspect CLI directly",
+        audit_log("error", "cmd", command, str(exc))
+        raise click_error(
+            f"rule pack error: {exc}. The command was NOT executed.",
+            CONFIG_ERROR,
+        ) from exc
+    if entrypoint_redirect is not None:
+        command = shlex.join(args)
+        suggestion = entrypoint_suggestion(entrypoint_redirect, agent)
+        detail = (
+            f"local rule {entrypoint_redirect.qualified_id}: "
+            f"use {entrypoint_redirect.rule.target} directly"
         )
+        audit_log("blocked", "cmd", command, detail)
         click.echo(
-            "ozm: Python and uv wrappers for Example inspection are not allowed. "
-            "Use the installed CLI entry point.",
+            f"ozm: blocked command wrapper by local rule "
+            f"'{entrypoint_redirect.qualified_id}'.",
             err=True,
         )
+        click.echo(f"ozm: {entrypoint_redirect.rule.guidance}", err=True)
         click.echo(f"ozm: re-run as: {suggestion}", err=True)
-        raise click_error("use the installed example_inspect CLI directly", BLOCKED)
+        raise click_error(
+            "use the configured installed entry point directly",
+            BLOCKED,
+        )
 
     typed_operation = None
     if github_proxy:
