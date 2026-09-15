@@ -258,6 +258,8 @@ $ ozm git --agent-name "Inspect branches" --agent-description "List available br
 - `require_branch: true` — prevents commits directly on main/master
 - `branch_prefixes: ["user/", "feat/", "fix/"]` — requires branch names to start with a listed prefix
 
+For an atomic multi-ref rewrite, provide one full `--force-with-lease=REF:EXPECTED_SHA` option for each forced ref. Ozm rejects the complete push if any force option is broad or malformed.
+
 **One-time overrides:** add `--reason "justification"` to an override-eligible `ozm git` or config-blocked `ozm cmd` operation. Commit-message errors and broad or unpinned force pushes are not override-eligible. Approved overrides are logged, but they are not cached and do not change allowlists.
 
 ---

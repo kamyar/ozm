@@ -220,17 +220,25 @@ def _force_push_present(args: list[str]) -> bool:
     )
 
 
-def _pinned_force_lease(args: list[str]) -> str | None:
+def _pinned_force_leases(args: list[str]) -> tuple[str, ...] | None:
+    """Return all exact leases, or None if any force form is broad or malformed."""
     force_args = [
         arg for arg in args
         if arg in {"-f", "--mirror"}
         or arg.startswith("--force")
         or (not arg.startswith("-") and arg.startswith("+"))
     ]
-    if len(force_args) != 1:
+    if not force_args:
         return None
-    match = PINNED_FORCE_LEASE.fullmatch(force_args[0])
-    return force_args[0] if match else None
+    if not all(PINNED_FORCE_LEASE.fullmatch(arg) for arg in force_args):
+        return None
+    return tuple(force_args)
+
+
+def _pinned_force_lease(args: list[str]) -> str | None:
+    """Return one exact lease for callers that require a single-ref force."""
+    leases = _pinned_force_leases(args)
+    return leases[0] if leases is not None and len(leases) == 1 else None
 
 
 def _check_push(
@@ -241,7 +249,7 @@ def _check_push(
 ) -> str | None:
     """Return a violation string if blocked, None if ok."""
     if _force_push_present(args):
-        if not allow_pinned_force or _pinned_force_lease(args) is None:
+        if not allow_pinned_force or _pinned_force_leases(args) is None:
             return "force push is not allowed"
 
     branch = get_current_branch(global_args)
@@ -447,10 +455,11 @@ def git_cmd(args: tuple[str, ...]) -> None:
     elif subcmd == "push":
         full_cmd = _git_command([*global_args, subcmd, *rest])
         if _force_push_present(rest):
-            pinned_lease = _pinned_force_lease(rest)
-            if pinned_lease is None:
+            pinned_leases = _pinned_force_leases(rest)
+            if pinned_leases is None:
                 _reject_non_overridable(
-                    "force push requires --force-with-lease=REF:EXPECTED_SHA",
+                    "force push requires --force-with-lease=REF:EXPECTED_SHA "
+                    "for every forced ref",
                     full_cmd,
                 )
             branch_violation = _check_push(

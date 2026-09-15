@@ -254,6 +254,23 @@ class GitForceLeaseShapeTests(unittest.TestCase):
             with self.subTest(args=args):
                 self.assertIsNone(git_mod._pinned_force_lease(args))
 
+    def test_multiple_full_pinned_leases_are_eligible_together(self):
+        branch = "--force-with-lease=refs/heads/main:" + "a" * 40
+        tag = "--force-with-lease=refs/tags/v1:" + "b" * 40
+        self.assertEqual(
+            git_mod._pinned_force_leases(["--atomic", branch, tag]),
+            (branch, tag),
+        )
+        self.assertIsNone(git_mod._pinned_force_lease([branch, tag]))
+
+    def test_one_malformed_lease_rejects_the_full_set(self):
+        valid = "--force-with-lease=refs/heads/main:" + "a" * 40
+        self.assertIsNone(
+            git_mod._pinned_force_leases(
+                [valid, "--force-with-lease=refs/tags/v1:abc123"]
+            )
+        )
+
 
 class GitOverrideTests(unittest.TestCase):
     LEASE = "--force-with-lease=refs/heads/topic:" + "a" * 40
@@ -276,6 +293,33 @@ class GitOverrideTests(unittest.TestCase):
         subprocess_mod.run.assert_called_once_with(
             [git_mod._git_binary(), "push", self.LEASE]
         )
+
+    def test_approved_multiple_pinned_leases_run_in_one_atomic_push(self):
+        second = "--force-with-lease=refs/tags/v1:" + "b" * 40
+        args = [
+            "push",
+            "--atomic",
+            self.LEASE,
+            second,
+            "origin",
+            "refs/heads/topic:refs/heads/topic",
+            "refs/tags/v1:refs/tags/v1",
+        ]
+        completed = subprocess.CompletedProcess(args=[], returncode=0)
+
+        with patch.object(git_mod, "get_current_branch", return_value="kamyar/topic"), \
+             patch.object(git_mod, "request_override", return_value=ApprovalResult(True)) as request_override, \
+             patch.object(git_mod, "subprocess") as subprocess_mod, \
+             patch.object(git_mod, "audit_log"):
+            subprocess_mod.run.return_value = completed
+            result = CliRunner().invoke(
+                git_mod.git_cmd,
+                [*META, *args, "--reason", "atomic reviewed rewrite"],
+            )
+
+        self.assertEqual(result.exit_code, 0, result.output)
+        request_override.assert_called_once()
+        subprocess_mod.run.assert_called_once_with([git_mod._git_binary(), *args])
 
     def test_denied_pinned_lease_override_does_not_run(self):
         with patch.object(git_mod, "get_current_branch", return_value="kamyar/topic"), \
