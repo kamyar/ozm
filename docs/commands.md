@@ -105,6 +105,8 @@ $ ozm cmd --agent-name "Start services" --agent-description "Bring the local Doc
 
 **Built-in semantic reads:** Exact conservative forms of `command -v`, `bazel query`, `brew search`, `npm view`, and `npm list` run before allowlist, cache, and approval checks. Ozm also recognizes exact trusted forms for Pi metadata and model lists, filesystem and container disk usage, selected tool help, selected `go env` keys, and non-secret Pi metadata variables. It resolves these tools from trusted system locations before execution. Write-capable variants such as `pi update`, Docker prune without `--help`, `go env -w`, and secret-bearing `printenv` remain reviewed. `bazel query --output_file` and unknown forms are not semantic reads. `gh api --help` is also a local semantic read.
 
+**Trusted file reads:** `cmp FILE_A FILE_B` and `shasum -a 256 FILE...` use trusted system executables. File operands must be non-empty and must not start with `-`. Unknown options and stdin operands retain normal approval checks. Ozm preserves child exit codes; a comparison difference or missing file remains a nonzero result.
+
 **Script and entry-point detection:** If an enabled private rule pack detects a configured Python, uv, or script wrapper, Ozm stops before approval and prints the configured installed entry point. If Ozm detects another direct script, interpreter script, or wrapper-based script (for example, `ozm cmd poll.sh`, `ozm cmd python script.py`, or `ozm cmd uv run script.py`), it stops before policy, cache, and approval checks. The `ozm run` suggestion preserves script arguments. Extensionless files with a shebang are also detected. This ensures script content uses review and the content hash cache.
 
 ```

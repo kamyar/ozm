@@ -200,6 +200,7 @@ TIPS = [
     "generated shell snippet; invoke each ozm command directly and separately.",
     "Prefer proven read-only operations. Ozm recognizes conservative forms of command -v, "
     "bazel query, brew search, npm view, npm list, trusted Pi metadata, trusted tool help, "
+    "trusted file comparison and SHA-256 checksum forms, "
     "and trusted disk-usage commands without approval. Reach "
     "for rg, cat, nl, head, tail, ls, and git status/log/diff first.",
     "Avoid complex commands. Use root-level '--grep TERM' and '--head N' "

@@ -157,6 +157,18 @@ def _trusted_read_only_reason(args: list[str]) -> str | None:
     if os.path.sep in args[0] and os.path.realpath(args[0]) != os.path.realpath(executable):
         return None
 
+    if command == "cmp":
+        if len(rest) == 2 and all(item and not item.startswith("-") for item in rest):
+            return "trusted file comparison"
+        return None
+    if command == "shasum":
+        if (
+            rest[:2] == ["-a", "256"]
+            and len(rest) >= 3
+            and all(item and not item.startswith("-") for item in rest[2:])
+        ):
+            return "trusted SHA-256 file checksum"
+        return None
     if command == "pi":
         if rest in (["--help"], ["--version"], ["list"], ["models", "--help"], ["config", "--help"]):
             return "trusted pi metadata"
