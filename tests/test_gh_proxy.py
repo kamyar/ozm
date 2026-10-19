@@ -168,7 +168,8 @@ class GitHubProxyTests(unittest.TestCase):
         run_command.assert_not_called()
 
     def test_proxy_requires_agent_metadata(self):
-        result = CliRunner().invoke(gh_mod.gh_cmd, ["api", "rate_limit"])
+        with patch("ozm.agent.audit_log"):
+            result = CliRunner().invoke(gh_mod.gh_cmd, ["api", "rate_limit"])
 
         self.assertNotEqual(result.exit_code, 0)
         self.assertIn("--agent-name", result.output)

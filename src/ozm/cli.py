@@ -209,9 +209,11 @@ TIPS = [
     "Avoid hacky shell wrappers. Things like 'bash -lc ...', inline 'python -c', "
     "or shell expansion ($(...), backticks) look like bypasses and are blocked — "
     "put real logic in a reviewed script and run it with 'ozm run <script>'.",
-    "Audit approval volume with 'ozm log --summary --since 3h'. Generated run "
-    "entries include a content digest and command-family summary without full "
-    "arguments.",
+    "Audit approval volume with 'ozm log --summary --since 3h'. Summaries show "
+    "the UTC window and entry limit, approval families, policy blocks, and "
+    "validation failures. New records include agent identity, rule identifiers, "
+    "script digests, and static nested-command descriptions. These context "
+    "fields do not copy descriptions or argument values and never grant permission.",
     "Avoid curl. Install HTTPie with 'uv tool install httpie' and use explicit "
     "methods (e.g. 'http GET <url>', 'http POST <url> key=value'). For complex "
     "requests, write a reviewed Python script using httpx and run it with "

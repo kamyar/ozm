@@ -14,6 +14,7 @@ import shlex
 import unicodedata
 
 from ozm.storage import load_yaml_no_follow, refuse_symlink, save_yaml_atomic_no_follow
+from ozm.audit import set_context as set_audit_context
 
 SHELL_METACHARS = frozenset(";|&$`\n()<>{}[]")
 
@@ -264,14 +265,16 @@ def _pattern_matches_command(command: str, first_word: str, pattern: str) -> boo
 
 def _matching_pattern(command: str, key: str) -> str | None:
     first_word = command.split()[0] if command.strip() else ""
-    for config in _command_configs():
+    for config_index, config in enumerate(_command_configs()):
         patterns = config.get(key, [])
         if not isinstance(patterns, list):
             continue
-        for pattern in patterns:
+        for pattern_index, pattern in enumerate(patterns):
             if not isinstance(pattern, str):
                 continue
             if _pattern_matches_command(command, first_word, pattern):
+                scope = "project" if config_index == 0 else "global"
+                set_audit_context(rule=f"{scope}.{key}[{pattern_index}]")
                 return pattern
     return None
 
@@ -327,14 +330,14 @@ def add_blocked_command(pattern: str, *, global_scope: bool = False) -> bool:
 def github_operation_allowed(operation: str, repository: str) -> bool:
     """Return true for an exact typed operation and repository authorization."""
     repository = repository.lower()
-    for config in _command_configs():
+    for config_index, config in enumerate(_command_configs()):
         github = config.get("github", {})
         if not isinstance(github, dict):
             continue
         entries = github.get("allowed_operations", [])
         if not isinstance(entries, list):
             continue
-        for entry in entries:
+        for entry_index, entry in enumerate(entries):
             if not isinstance(entry, dict) or entry.get("operation") != operation:
                 continue
             repositories = entry.get("repositories", [])
@@ -344,6 +347,8 @@ def github_operation_allowed(operation: str, repository: str) -> bool:
                 isinstance(item, str) and item.lower() == repository
                 for item in repositories
             ):
+                scope = "project" if config_index == 0 else "global"
+                set_audit_context(rule=f"{scope}.github.allowed_operations[{entry_index}]")
                 return True
     return False
 

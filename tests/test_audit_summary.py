@@ -42,6 +42,9 @@ class AuditSummaryTests(unittest.TestCase):
         self.assertEqual(summary["actions"]["clicked"], 2)
         self.assertEqual(summary["kinds"]["run"], 2)
         self.assertEqual(summary["action_kinds"]["clicked:run"], 1)
+        self.assertEqual(summary["manual_approvals_by_type"], {"direct command": 1, "generated shell": 1, "git": 1})
+        self.assertEqual(summary["generated_approvals_by_family"], {"rg": 1})
+        self.assertIsNone(json.loads(result.output)["selection"]["limit"])
 
     def test_plain_summary_is_concise(self):
         runner = CliRunner()
@@ -74,6 +77,45 @@ class AuditSummaryTests(unittest.TestCase):
 
         self.assertEqual(result.exit_code, 2, result.output)
         self.assertIn("30m, 3h, or 2d", result.output)
+
+    def test_failures_and_approval_family_totals_are_distinct(self):
+        entries = [
+            {"action": "clicked", "kind": "cmd", "target": "cmp first second"},
+            {"action": "clicked", "kind": "run", "target": "script.sh"},
+            {"action": "clicked", "kind": "run", "target": "shell:query", "families": ["example-inspect", "jq", "jq"]},
+            {"action": "blocked", "kind": "cmd", "target": "unsafe"},
+            {"action": "denied", "kind": "cmd", "target": "unknown"},
+            {"action": "invalid", "kind": "cmd", "target": "<metadata>"},
+        ]
+        summary = audit_mod._summary(entries)
+        self.assertEqual(summary["entries"], 6)
+        self.assertEqual(summary["manual_approvals"], 3)
+        self.assertEqual(sum(summary["manual_approvals_by_family"].values()), 3)
+        self.assertEqual(sum(summary["manual_approvals_by_type"].values()), 3)
+        self.assertEqual(summary["generated_approvals_by_family"], {"example-inspect": 1, "jq": 1})
+        self.assertEqual(summary["blocked_commands"], 1)
+        self.assertEqual(summary["manual_denials"], 1)
+        self.assertEqual(summary["validation_failures"], 1)
+
+    def test_json_reports_selection_and_entry_limit(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            file = os.path.abspath("audit.log")
+            with open(file, "w") as stream:
+                for index in range(5):
+                    stream.write(f"2026-08-28 12:00:{index:02d}  config     cmd  /tmp  item-{index}\n")
+            with patch.object(audit_mod, "AUDIT_FILE", file):
+                result = runner.invoke(audit_mod.log_cmd, ["--json", "-n", "2"])
+        payload = json.loads(result.output)
+        self.assertEqual(payload["selection"]["matched"], 5)
+        self.assertEqual(payload["selection"]["returned"], 2)
+        self.assertEqual(payload["selection"]["limit"], 2)
+        self.assertEqual(len(payload["entries"]), 2)
+
+    def test_invalid_duration_is_rejected_even_without_log_file(self):
+        with patch.object(audit_mod, "AUDIT_FILE", "/nonexistent/audit.log"):
+            result = CliRunner().invoke(audit_mod.log_cmd, ["--since", "invalid"])
+        self.assertEqual(result.exit_code, 2)
 
     def test_default_log_output_still_shows_twenty_entries(self):
         runner = CliRunner()

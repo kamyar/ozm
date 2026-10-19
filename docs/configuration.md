@@ -202,6 +202,10 @@ Plain text, one entry per line:
 2026-04-26 10:19:00  no-dialog  run  /Users/you/project  /path/to/new.sh
 ```
 
-Fields: `timestamp  action  type  working_directory  target  [# feedback]`
+Fields: `timestamp  action  type  working_directory  target  [# feedback] [TAB @ozm:JSON]`
 
-Actions: `clicked` (user approved in dialog), `cached` (hash matched prior approval), `config` (matched allowlist), `semantic` (built-in read-only classifier), `override` (user-approved one-time override), `denied` (user denied in dialog), `blocked` (matched blocklist), `error`, `no-dialog` (dialog could not be shown, command blocked)
+The optional suffix is a versioned JSON object. New records include agent identity, decision reason, and command family. Matched permissions use a scope and list index, such as `global.allowed_commands[3]`, rather than copying a possibly sensitive pattern. Script records include the reviewed SHA-256. Generated shell records can include nested command families; unsupported grammar is `unknown`. These diagnostic fields never authorize execution. Agent descriptions, metadata failure values, and new argument copies are omitted. Existing target and feedback behavior is unchanged. Old records remain readable.
+
+`ozm log --summary --since 3h` reports the selected UTC window and entry limit. It separates manual approvals, manual denials, policy blocks, validation failures, direct commands, scripts, and generated shell commands. JSON output includes structured selection details.
+
+Actions: `clicked` (user approved in dialog), `cached` (hash matched prior approval), `config` (matched allowlist), `semantic` (built-in read-only classifier), `override` (user-approved one-time override), `denied` (user denied in dialog), `blocked` (policy block), `invalid` (metadata validation failure), `error`, `no-dialog` (dialog could not be shown, command blocked)

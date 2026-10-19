@@ -116,7 +116,7 @@ ozm: use 'ozm run --agent-name "Run script" --agent-description "Try to execute 
 
 **Editable commands:** The macOS approval dialog lets you edit the command before running it. You can also enter a rule pattern (e.g. `curl https://api.example.com/*`). If you click Allow, the pattern is saved as an allowlist rule. If you click Deny, the pattern is saved as a blocklist rule. Check **Apply globally** to save the rule in `~/.ozm/config.yaml`; otherwise it is saved to the trusted project config. If **Apply globally** is checked and the rule field is blank, ozm saves the exact command as the global rule.
 
-**Agent metadata:** `--agent-name` is the short work name shown in the dialog. `--agent-description` must be exactly one line describing what the agent is trying to do. Missing, empty, multiline, or overlong metadata is rejected before execution, with an instruction for the agent to write the requirement to memory before retrying.
+**Agent metadata:** `--agent-name` is the short work name shown in the dialog, with an 80-character limit. `--agent-description` must be exactly one line, with a 200-character limit. Missing metadata receives a memory reminder. Invalid metadata receives a specific instruction to shorten the field, use one line, provide a non-empty value, or repair the JSON. Ozm does not truncate metadata. Validation failures retain their existing exit code and occur before approval or execution.
 
 **Disallowed commands:** `sed`, `gsed`, and `rg --pre` are blocked even when they appear in `allowed_commands`, because they can edit files in-place or execute hidden preprocessing. Use `rg` without `--pre` for searching, `cat`/`nl`/`head`/`tail` for viewing, or write a small reviewed script and run it with `ozm run <script>` for transformations.
 
@@ -347,7 +347,7 @@ After reset, the next `ozm run` or `ozm cmd` will prompt for approval again.
 
 ## ozm log
 
-Show recent entries from the audit log at `~/.ozm/audit.log`. Every approval, denial, and block is recorded with timestamp, action, type, working directory, and target.
+Show recent entries from the audit log at `~/.ozm/audit.log`. Records include timestamp, action, type, working directory, and target. New records add versioned structured context for agent identity, decision reason, matched rule identifier, script digest, and static generated-command descriptions. Agent descriptions and argument values are not copied into the new context fields. Metadata validation failures record a category and `<metadata>` without the rejected values.
 
 ```
 ozm log [-n COUNT] [--since DURATION] [--summary] [--json]
@@ -375,9 +375,13 @@ $ ozm log -n 5
 2026-04-26 10:18:30  config     cmd  /Users/you/project  docker compose up
 ```
 
-Actions: `clicked` (user approved), `cached` (hash matched), `config` (allowlist match), `semantic` (built-in read-only classifier), `operation` (typed repository-scoped GitHub authorization), `override` (user-approved one-time override), `denied`, `blocked`, `error`, `no-dialog` (GUI unavailable, command blocked).
+Actions: `clicked` (user approved), `cached` (hash matched), `config` (allowlist match), `semantic` (built-in read-only classifier), `operation` (typed repository-scoped GitHub authorization), `override` (user-approved one-time override), `denied`, `blocked`, `invalid` (metadata validation failure), `error`, `no-dialog` (GUI unavailable, command blocked).
 
-The `# comment` at the end is the user's feedback or decision context. Generated `shell:` and `stdin:` run entries include only their source type, content SHA-256, executable-line count, and command-family names. Ozm does not add full generated content or arguments to the audit line.
+The `# comment` is user feedback or decision context. New records append a tab followed by `@ozm:` and a versioned JSON object. Old records remain readable. Generated shell records identify command substitutions separately from literal assignments when the static parser supports the grammar. Unsupported grammar is `unknown`. The parser does not execute, expand, or authorize anything. Persistent scripts also record their reviewed content digest without adding script bodies or arguments.
+
+Plain output reports the selected UTC window, matched count, returned count, and entry limit on stderr. Summary output shows this selection before the counts. JSON output includes a top-level `selection` object. The default plain and JSON entry limit remains 20; summaries have no default entry limit. Use `-n COUNT` to set an explicit limit after the time filter.
+
+Summaries separate manual approvals by command family and type, generated command families, manual denials, policy blocks, and validation failures. One generated decision can contain several command families, so generated-family counts are incidences, not additional decisions.
 
 ---
 

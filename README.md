@@ -203,11 +203,11 @@ Ozm does not load rule packs from a repository. A malformed or missing enabled p
 
 1. `ozm install` writes the enforcement hook and configures Claude Code and Codex to use it.
 2. The hook rejects direct risky command families and tells the agent to use `ozm run`, `ozm cmd`, or `ozm git`.
-3. `ozm run`, `ozm cmd`, and `ozm git` reject missing, empty, multiline, or malformed agent metadata before execution.
+3. `ozm run`, `ozm cmd`, and `ozm git` reject missing, empty, multiline, or malformed agent metadata before execution. Missing metadata receives the memory reminder. Invalid metadata receives a specific repair instruction. The name limit remains 80 characters and the description limit remains 200 characters.
 4. Commands are checked against hard safety rules, project/global blocklists, semantic read-only rules, project/global allowlists, and the project-scoped approval cache.
 5. Unknown commands and new or changed scripts open a native macOS approval dialog.
 6. Approved script contents and exact commands are stored per project in `~/.ozm/hashes.yaml`; changed script snapshots live under `~/.ozm/snapshots/`.
-7. Every decision is appended to `~/.ozm/audit.log`. Use `ozm log --summary --since 3h` to count manual approvals, denials, and generated run approvals. Generated run entries include a content digest and safe command-family summary. Actions include `clicked`, `cached`, `config`, `semantic`, `operation`, `override`, `denied`, `blocked`, or `no-dialog`.
+7. Every recorded decision is appended to `~/.ozm/audit.log`. New records retain the text fields and add a versioned, tab-delimited JSON suffix. It records agent identity, decision reason, matched rule identifier, and script digest when applicable. It does not copy agent descriptions or command arguments into these new fields. Metadata failures record only a category and `<metadata>`, not input values. Old records remain readable. Use `ozm log --summary --since 3h` to separate manual approvals, denials, policy blocks, validation failures, and script approvals. Generated shell descriptions include nested command families where the static parser can identify them. Unsupported grammar is `unknown`; audit classification never grants permission. Log output reports the selected UTC window and entry limit. JSON output includes a `selection` object.
 
 On macOS, approvals use native Cocoa dialogs with syntax highlighting via Pygments, dark mode support, agent work context, editable command fields, and inline feedback. Without a GUI session, unknown commands and new or changed scripts are blocked rather than silently approved.
 

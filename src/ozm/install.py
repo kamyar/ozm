@@ -382,7 +382,7 @@ If an override-eligible command is blocked, use `--reason` to request a one-time
 
 The user sees your reasoning in a dialog and can approve once. This is never cached or added to allowlists.
 
-If ozm rejects a command because agent metadata is missing or invalid, write the metadata requirement to memory before retrying.
+If agent metadata is missing, write the metadata requirement to memory before retrying. For invalid metadata, follow the specific repair instruction. Keep the agent name within 80 characters and the description within 200 characters. Do not truncate either field silently.
 """
 
 AGENTS_MD = """# ozm — script execution gate
@@ -421,7 +421,7 @@ If an override-eligible command is blocked, use `--reason` to request a one-time
 
 The user sees your reasoning in a dialog and can approve once. This is never cached or added to allowlists.
 
-If ozm rejects a command because agent metadata is missing or invalid, write the metadata requirement to memory before retrying.
+If agent metadata is missing, write the metadata requirement to memory before retrying. For invalid metadata, follow the specific repair instruction. Keep the agent name within 80 characters and the description within 200 characters. Do not truncate either field silently.
 """
 
 CLAUDE_HOOKS_CONFIG = {

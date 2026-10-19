@@ -9,6 +9,7 @@ from dataclasses import dataclass
 import click
 
 from ozm.exit_codes import MISSING_METADATA
+from ozm.audit import begin_context, set_context, log as audit_log
 
 MAX_AGENT_NAME_LENGTH = 80
 MAX_AGENT_DESCRIPTION_LENGTH = 200
@@ -31,9 +32,16 @@ def _has_newline(value: str) -> bool:
     return "\n" in value or "\r" in value
 
 
-def _metadata_error(message: str) -> click.ClickException:
-    exc = click.ClickException(f"{message}\n{MEMORY_REMINDER}")
+def _metadata_error(
+    message: str,
+    *,
+    repair: str = "Use non-empty, one-line string fields for the agent name and description.",
+    category: str = "invalid_metadata",
+) -> click.ClickException:
+    guidance = MEMORY_REMINDER if category == "missing_metadata" else f"ozm: {repair}"
+    exc = click.ClickException(f"{message}\n{guidance}")
     exc.exit_code = MISSING_METADATA
+    exc.audit_category = category
     return exc
 
 
@@ -41,7 +49,11 @@ def _metadata_from_json(raw: str) -> tuple[str | None, str | None]:
     try:
         data = json.loads(raw)
     except json.JSONDecodeError as exc:
-        raise _metadata_error(f"ozm: --agent-json is not valid JSON: {exc.msg}.") from exc
+        raise _metadata_error(
+            f"ozm: --agent-json is not valid JSON: {exc.msg}.",
+            repair="Pass --agent-json as a JSON object with string name and description fields.",
+            category="invalid_metadata_json",
+        ) from exc
     if not isinstance(data, dict):
         raise _metadata_error("ozm: --agent-json must be a JSON object.")
     name = data.get("name", data.get("agent_name"))
@@ -61,40 +73,53 @@ def validate_agent_metadata(
     if agent_name is None or agent_description is None:
         raise _metadata_error(
             "ozm: missing required agent metadata: pass "
-            "--agent-name and --agent-description."
+            "--agent-name and --agent-description.",
+            category="missing_metadata",
         )
 
     name = agent_name.strip()
     description = agent_description.strip()
     errors = []
+    repairs = []
 
     if not name:
         errors.append("--agent-name must not be empty")
+        repairs.append("Provide a non-empty --agent-name.")
     elif _has_newline(name):
         errors.append("--agent-name must be one line")
+        repairs.append("Use one line for --agent-name.")
     elif len(name) > MAX_AGENT_NAME_LENGTH:
         errors.append(
             f"--agent-name is {len(name)} chars "
             f"(max {MAX_AGENT_NAME_LENGTH})"
         )
+        repairs.append(f"Shorten --agent-name to at most {MAX_AGENT_NAME_LENGTH} characters.")
 
     if not description:
         errors.append("--agent-description must not be empty")
+        repairs.append("Provide a non-empty --agent-description.")
     elif _has_newline(description):
         errors.append("--agent-description must be exactly one line")
+        repairs.append("Use one line for --agent-description.")
     elif len(description) > MAX_AGENT_DESCRIPTION_LENGTH:
         errors.append(
             f"--agent-description is {len(description)} chars "
             f"(max {MAX_AGENT_DESCRIPTION_LENGTH})"
         )
+        repairs.append(
+            f"Shorten --agent-description to at most {MAX_AGENT_DESCRIPTION_LENGTH} characters."
+        )
 
     if errors:
-        raise _metadata_error("ozm: invalid agent metadata: " + "; ".join(errors))
+        raise _metadata_error(
+            "ozm: invalid agent metadata: " + "; ".join(errors),
+            repair=" ".join(repairs),
+        )
 
     return AgentMetadata(name=name, description=description)
 
 
-def extract_agent_metadata(args: list[str]) -> tuple[list[str], AgentMetadata]:
+def _extract_agent_metadata(args: list[str]) -> tuple[list[str], AgentMetadata]:
     """Remove ozm agent metadata flags from args and return validated metadata.
 
     Precedence is explicit flags, then --agent-json, then OZM_AGENT_* env vars.
@@ -165,6 +190,28 @@ def extract_agent_metadata(args: list[str]) -> tuple[list[str], AgentMetadata]:
         else env_description
     )
     return cleaned, validate_agent_metadata(agent_name, agent_description)
+
+
+def extract_agent_metadata(args: list[str]) -> tuple[list[str], AgentMetadata]:
+    """Bind validated identity or record a value-free validation failure."""
+    begin_context()
+    try:
+        cleaned, agent = _extract_agent_metadata(args)
+    except click.ClickException as exc:
+        context = click.get_current_context(silent=True)
+        if context is not None:
+            kind = context.command.name or "cmd"
+            if kind in {"shell", "bash"}:
+                kind = "run"
+            set_context(failure_category=getattr(exc, "audit_category", "invalid_metadata"))
+            try:
+                audit_log("invalid", kind, "<metadata>")
+            except (OSError, RuntimeError):
+                # Validation already fails closed. Preserve its original error.
+                pass
+        raise
+    set_context(agent=agent.name)
+    return cleaned, agent
 
 
 def extract_agent_metadata_from_command(

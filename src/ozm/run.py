@@ -15,7 +15,8 @@ import tempfile
 import click
 from ozm.agent import extract_agent_metadata
 from ozm.approve import request_approval
-from ozm.audit import log as audit_log
+from ozm.audit import log as audit_log, set_context as set_audit_context
+from ozm.audit_shell import describe_shell
 from ozm.exit_codes import BLOCKED, CONFIG_ERROR, DENIED, NO_DIALOG, click_error
 from ozm.command_routing import (
     configured_entrypoint_redirect,
@@ -550,19 +551,20 @@ def _run_reviewed_script(
     generated_shell = key_target.startswith(SHELL_PREFIX)
     generated_review = key_target.startswith((STDIN_PREFIX, SHELL_PREFIX))
     generated_context = None
+    source = "shell" if generated_shell else "stdin" if generated_review else "file"
+    set_audit_context(agent=agent.name, source=source, script_sha256=current_hash)
     if generated_review:
-        source = "shell" if generated_shell else "stdin"
-        families = []
-        for line in executable_lines:
-            tokens = _shell_tokens(line)
-            if not tokens:
-                continue
-            family = os.path.basename(tokens[0])
-            if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=.*", family):
-                family = "assignment"
-            if family not in families:
-                families.append(family)
-        family_text = ",".join(families[:5]) or "none"
+        # Do not turn Unicode line separators or carriage returns in arguments
+        # into shell command boundaries. Only the literal shebang line is removed.
+        shebang, _, script_body = display_content.partition("\n")
+        shell_script = re.fullmatch(r"#![ \t]*(?:/[^ \t]*/)?(?:sh|bash|zsh)(?:[ \t].*)?", shebang) or re.fullmatch(
+            r"#![ \t]*/[^ \t]*/env[ \t]+(?:sh|bash|zsh)", shebang
+        )
+        description = describe_shell(script_body) if shell_script else {
+            "families": ["unknown"], "nested_families": [], "classification": "unknown",
+        }
+        set_audit_context(executable_lines=len(executable_lines), **description)
+        family_text = ",".join(description["families"])
         generated_context = (
             f"generated={source}; sha256={current_hash}; "
             f"executable_lines={len(executable_lines)}; families={family_text}"
@@ -599,6 +601,7 @@ def _run_reviewed_script(
             f"local rule {entrypoint_redirect.qualified_id}: use "
             f"{entrypoint_redirect.rule.target} directly"
         )
+        set_audit_context(rule=f"local:{entrypoint_redirect.qualified_id}")
         log_review("blocked", reason)
         _cleanup(cleanup_path)
         suggestion = entrypoint_suggestion(entrypoint_redirect, agent)

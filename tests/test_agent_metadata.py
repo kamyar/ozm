@@ -2,9 +2,12 @@ import subprocess
 import unittest
 from unittest.mock import patch
 
+from click import ClickException
 from click.testing import CliRunner
 
 from ozm import approve as approve_mod
+from ozm import agent as agent_mod
+from ozm.exit_codes import MISSING_METADATA
 from ozm import cmd as cmd_mod
 from ozm.agent import AgentMetadata
 from ozm.approve import ApprovalResult
@@ -16,6 +19,11 @@ META = [
 
 
 class AgentMetadataTests(unittest.TestCase):
+    def setUp(self):
+        audit = patch.object(agent_mod, "audit_log")
+        audit.start()
+        self.addCleanup(audit.stop)
+
     def test_cmd_rejects_missing_agent_metadata(self):
         with patch.object(cmd_mod, "request_cmd_approval") as request_cmd_approval:
             result = CliRunner().invoke(cmd_mod.cmd_cmd, ["echo", "hello"])
@@ -38,7 +46,41 @@ class AgentMetadataTests(unittest.TestCase):
 
         self.assertNotEqual(result.exit_code, 0)
         self.assertIn("--agent-description must be exactly one line", result.output)
-        self.assertIn("write this requirement to your memory", result.output)
+        self.assertIn("Use one line for --agent-description", result.output)
+        self.assertNotIn("write this requirement to your memory", result.output)
+
+    def test_description_length_boundary(self):
+        description = "x" * 200
+        self.assertEqual(
+            agent_mod.validate_agent_metadata("Test", description).description,
+            description,
+        )
+        with self.assertRaises(ClickException) as error:
+            agent_mod.validate_agent_metadata("Test", description + "x")
+        self.assertEqual(error.exception.exit_code, MISSING_METADATA)
+        self.assertIn("201 chars (max 200)", str(error.exception))
+        self.assertIn("Shorten --agent-description to at most 200 characters", str(error.exception))
+        self.assertNotIn("missing required", str(error.exception))
+        self.assertNotIn("write this requirement to your memory", str(error.exception))
+
+    def test_invalid_metadata_stops_before_approval_and_execution(self):
+        cases = [
+            (["--agent-name", "Test", "--agent-description", "x" * 201], "Shorten --agent-description"),
+            (["--agent-name", "x" * 81, "--agent-description", "Test"], "Shorten --agent-name"),
+            (["--agent-name", "Test", "--agent-description", "first\nsecond"], "Use one line"),
+            (["--agent-json", "{invalid"], "JSON object with string"),
+            (["--agent-json", "[]"], "JSON object"),
+            (["--agent-name", "Test", "--agent-description", ""], "Provide a non-empty"),
+        ]
+        for metadata, repair in cases:
+            with self.subTest(metadata=metadata), \
+                 patch.object(cmd_mod, "request_cmd_approval") as approval, \
+                 patch.object(cmd_mod, "_run_command") as execution:
+                result = CliRunner().invoke(cmd_mod.cmd_cmd, [*metadata, "echo", "test"])
+                self.assertEqual(result.exit_code, MISSING_METADATA, result.output)
+                self.assertIn(repair, result.output)
+                approval.assert_not_called()
+                execution.assert_not_called()
 
     def test_cmd_passes_agent_metadata_to_approval_dialog(self):
         with patch.object(cmd_mod, "is_command_blocked", return_value=None), \

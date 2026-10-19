@@ -15,7 +15,7 @@ import click
 
 from ozm.agent import extract_agent_metadata
 from ozm.approve import request_approval, request_cmd_approval, request_override
-from ozm.audit import log as audit_log
+from ozm.audit import log as audit_log, set_context as set_audit_context
 from ozm.exit_codes import BLOCKED, CONFIG_ERROR, DENIED, NO_DIALOG, click_error
 from ozm.command_routing import (
     configured_entrypoint_redirect,
@@ -686,6 +686,7 @@ def _cmd_impl(
             f"local rule {entrypoint_redirect.qualified_id}: "
             f"use {entrypoint_redirect.rule.target} directly"
         )
+        set_audit_context(rule=f"local:{entrypoint_redirect.qualified_id}")
         audit_log("blocked", "cmd", command, detail)
         click.echo(
             f"ozm: blocked command wrapper by local rule "
