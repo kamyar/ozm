@@ -107,6 +107,8 @@ $ ozm cmd --agent-name "Start services" --agent-description "Bring the local Doc
 
 **Trusted file reads:** `cmp FILE_A FILE_B` and `shasum -a 256 FILE...` use trusted system executables. File operands must be non-empty and must not start with `-`. Unknown options and stdin operands retain normal approval checks. Ozm preserves child exit codes; a comparison difference or missing file remains a nonzero result.
 
+**Returned result files:** when a tool returns a file path, run it directly. After it succeeds, read or filter the exact returned file in a separate call. Do not use command substitution only to connect the tool with a JSON filter. Do not reuse an earlier result path.
+
 **Script and entry-point detection:** If an enabled private rule pack detects a configured Python, uv, or script wrapper, Ozm stops before approval and prints the configured installed entry point. If Ozm detects another direct script, interpreter script, or wrapper-based script (for example, `ozm cmd poll.sh`, `ozm cmd python script.py`, or `ozm cmd uv run script.py`), it stops before policy, cache, and approval checks. The `ozm run` suggestion preserves script arguments. Extensionless files with a shebang are also detected. This ensures script content uses review and the content hash cache.
 
 ```

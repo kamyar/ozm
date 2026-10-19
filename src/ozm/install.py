@@ -350,6 +350,8 @@ All script execution and git operations must go through `ozm`.
 
 ## Rules
 
+- **Read returned result files separately:** when a tool returns a result file path, run it directly. After it succeeds, read or filter that exact file in a separate call. Do not use command substitution only to connect the tool and a JSON filter. Do not reuse an earlier result path.
+
 - **Always identify the agent work:** every `ozm run`, `ozm cmd`, `ozm gh`, and `ozm git` invocation must include `--agent-name "<what you are working on>"` and `--agent-description "<one-line intent>"`.
 - **Run scripts:** `ozm run --agent-name "<work>" --agent-description "<intent>" <script> [args...]` — never `python`, `bash`, `./`, or `uv run` directly
 - **Do not wrap direct commands in a script:** `ozm run` rejects scripts with only one executable line. It also rejects generated simple command chains and content where every command segment invokes `ozm`. Run each command directly and separately. Generated shell wrappers must not invoke or source another script; use `ozm run` so Ozm reviews the target content. Use `ozm bash --command` only for shell behavior. Run one-line shell-free content through `ozm cmd`, `ozm gh`, or `ozm git`.
@@ -390,6 +392,8 @@ AGENTS_MD = """# ozm — script execution gate
 All script execution and git operations must go through `ozm`.
 
 ## Rules
+
+- **Read returned result files separately:** when a tool returns a result file path, run it directly. After it succeeds, read or filter that exact file in a separate call. Do not use command substitution only to connect the tool and a JSON filter. Do not reuse an earlier result path.
 
 - **Always identify the agent work:** every `ozm run`, `ozm cmd`, `ozm gh`, and `ozm git` invocation must include `--agent-name "<what you are working on>"` and `--agent-description "<one-line intent>"`.
 - **Run scripts:** `ozm run --agent-name "<work>" --agent-description "<intent>" <script> [args...]` — never `python`, `bash`, `./`, or `uv run` directly

@@ -198,6 +198,10 @@ TIPS = [
     "Batch real multi-step logic in a script with a shebang and run it once "
     "with 'ozm run <script>'. Do not batch only ozm commands in a file or "
     "generated shell snippet; invoke each ozm command directly and separately.",
+    "When a tool returns a result file path, run it directly. After it succeeds, "
+    "read or filter that exact file in a separate call. Do not use command "
+    "substitution only to connect the tool and a JSON filter, and do not reuse "
+    "an earlier result path.",
     "Prefer proven read-only operations. Ozm recognizes conservative forms of command -v, "
     "bazel query, brew search, npm view, npm list, trusted Pi metadata, trusted tool help, "
     "trusted file comparison and SHA-256 checksum forms, "

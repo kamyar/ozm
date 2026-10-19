@@ -27,6 +27,13 @@ class TipsTests(unittest.TestCase):
         self.assertIn("ozm run <script>", result.output)
         self.assertIn("read-only", result.output)
         self.assertIn("bash -lc", result.output)
+        self.assertIn("result file path", result.output)
+        self.assertIn("separate call", result.output)
+
+    def test_generated_instructions_explain_result_file_reads(self):
+        for instructions in (install_mod.CLAUDE_MD, install_mod.AGENTS_MD):
+            self.assertIn("Read returned result files separately", instructions)
+            self.assertIn("Do not reuse an earlier result path", instructions)
 
 
 class CmdTests(unittest.TestCase):

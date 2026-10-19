@@ -106,6 +106,10 @@ ozm --cwd /path/to/worktree --grep "projection" --grep "coverage" --head 20 git 
 
 The controls work with `ozm cmd`, `ozm gh`, `ozm git`, and `ozm run`. Ozm applies `--cwd` before project policy. It applies `--grep` before `--head` or `--tail`. Ozm leaves stderr unchanged, continues consuming stdout until the child finishes, and preserves the child exit code even when grep finds no line. Use these options instead of creating a shell pipeline with `grep`, `rg`, `head`, or `tail` only to filter output. Ozm nudges generated commands that end in `|| true`, rejects raw or Ozm shell pipelines that end in a supported `head` form, and blocks Ozm pipelines to `true` because they discard output and can interrupt execution. Generated wrappers made only of separate simple commands must run each command directly. Generated wrappers must not invoke or source mutable scripts because the dialog would review the wrapper instead of the target script content.
 
+### Tools that return result file paths
+
+Run the tool directly. After it succeeds, read or filter the exact returned file in a separate call. Do not use `RESULT=$(...) && jq ... "$RESULT"` only to connect these steps. Do not reuse a result path from an earlier call. Separate calls retain normal command policy; this guidance does not approve shell substitutions.
+
 ### Commands: `ozm cmd`
 
 Use `ozm cmd` for non-script commands.
