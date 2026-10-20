@@ -21,8 +21,10 @@ from ozm.exit_codes import BLOCKED, CONFIG_ERROR, DENIED, NO_DIALOG, click_error
 from ozm.command_routing import (
     configured_entrypoint_redirect,
     entrypoint_suggestion,
+    is_explicit_shebang_script,
+    script_command_argv,
 )
-from ozm.config import project_key
+from ozm.config import _command_start_index, project_key
 from ozm.output_filter import (
     misplaced_root_control,
     output_filter_active,
@@ -31,6 +33,7 @@ from ozm.output_filter import (
 from ozm.rule_packs import load_entrypoint_redirects
 from ozm.storage import (
     ensure_private_dir,
+    exclusive_storage_lock,
     load_yaml_no_follow,
     refuse_symlink,
     save_bytes_atomic_no_follow,
@@ -68,7 +71,23 @@ def load_hashes() -> dict[str, str]:
     )
 
 
-def save_hashes(hashes: dict[str, str]) -> None:
+def _hash_store_lock():
+    return exclusive_storage_lock(
+        HASH_FILE + ".lock", directory=OZM_DIR, label="approval cache lock",
+    )
+
+
+def save_hashes(hashes: dict[str, str], *, merge: bool = False) -> None:
+    """Save under a lock; merge only newly approved keys after a dialog."""
+    with _hash_store_lock():
+        if merge:
+            latest = load_hashes()
+            latest.update(hashes)
+            hashes = latest
+        _write_hashes(hashes)
+
+
+def _write_hashes(hashes: dict[str, str]) -> None:
     _refuse_symlink(OZM_DIR, "approval cache directory")
     _refuse_symlink(HASH_FILE, "approval cache file")
     save_yaml_atomic_no_follow(
@@ -329,13 +348,14 @@ def _generated_script_wrapper(lines: list[str]) -> bool:
 
 
 def _segment_invokes_script(segment: list[str]) -> bool:
+    segment = script_command_argv(segment)
     if not segment:
         return False
+    if is_explicit_shebang_script(segment[0]):
+        return True
     command = os.path.basename(segment[0])
     if command in ("source", "."):
         return True
-    if command == "uv" and len(segment) > 1 and segment[1] == "run":
-        return _segment_invokes_script(segment[2:])
     if command in ("bash", "sh", "zsh", "python", "python3", "node", "ruby"):
         for arg in segment[1:]:
             if arg == "--":
@@ -497,20 +517,18 @@ def _line_contains_only_ozm(line: str) -> bool:
         tokens = list(lexer)
     except ValueError:
         return False
-    expect_command = True
+    segment: list[str] = []
     saw_command = False
-    for token in tokens:
+    for token in [*tokens, ";"]:
         if token and all(char in ";&|" for char in token):
-            if expect_command:
-                return False
-            expect_command = True
-            continue
-        if expect_command:
-            if token != "ozm":
+            start = _command_start_index(segment)
+            if start is None or segment[start] != "ozm":
                 return False
             saw_command = True
-            expect_command = False
-    return saw_command and not expect_command
+            segment = []
+        else:
+            segment.append(token)
+    return saw_command
 
 
 def _display_key_target(root: str, target: str) -> str:
@@ -579,7 +597,7 @@ def _run_reviewed_script(
         audit_log(action, "run", audit_target, feedback)
 
     entrypoint_redirect = None
-    if generated_shell:
+    if not generated_review or generated_shell:
         try:
             redirect_rules = load_entrypoint_redirects()
         except (OSError, RuntimeError) as exc:
@@ -589,7 +607,11 @@ def _run_reviewed_script(
                 f"rule pack error: {exc}. The command was NOT executed.",
                 CONFIG_ERROR,
             ) from exc
-        for segment in _shell_command_segments(executable_lines):
+        segments = (
+            _shell_command_segments(executable_lines)
+            if generated_shell else [[abs_path, *args]]
+        )
+        for segment in segments:
             entrypoint_redirect = configured_entrypoint_redirect(
                 segment,
                 rules=redirect_rules,
@@ -606,7 +628,7 @@ def _run_reviewed_script(
         _cleanup(cleanup_path)
         suggestion = entrypoint_suggestion(entrypoint_redirect, agent)
         raise click_error(
-            "generated shell content uses a wrapper blocked by local rule "
+            "command uses a wrapper blocked by local rule "
             f"'{entrypoint_redirect.qualified_id}'. "
             f"{entrypoint_redirect.rule.guidance} Re-run as: {suggestion}",
             BLOCKED,
@@ -689,7 +711,11 @@ def _run_reviewed_script(
         raise click_error(
             "scripts that only invoke ozm are not allowed. Run each ozm "
             "command directly, one at a time, instead of opening a file for "
-            "review. Direct commands can use normal automatic approvals.",
+            "review. Direct commands can use normal automatic approvals. "
+            "Environment prefixes do not need a separate shell review. If a "
+            "prefix selects an interpreter, install the script locally with a "
+            "fixed interpreter shebang and use 'ozm run' on that file. Do not "
+            "allowlist a PATH wrapper or a general-purpose interpreter.",
             BLOCKED,
         )
     direct_family = (
@@ -776,9 +802,8 @@ def _run_reviewed_script(
         )
 
         if approval.approved is True:
-            hashes[key] = current_hash
             try:
-                save_hashes(hashes)
+                save_hashes({key: current_hash}, merge=True)
             except (OSError, RuntimeError) as exc:
                 log_review("error", str(exc))
                 raise click_error(
@@ -982,9 +1007,10 @@ def reset_cmd(script: str | None, reset_all: bool) -> None:
     if reset_all:
         if script:
             raise click.ClickException("Use either a script name or --all, not both.")
-        hashes = load_hashes()
-        hashes = {k: v for k, v in hashes.items() if not k.startswith(prefix)}
-        save_hashes(hashes)
+        with _hash_store_lock():
+            hashes = load_hashes()
+            hashes = {k: v for k, v in hashes.items() if not k.startswith(prefix)}
+            _write_hashes(hashes)
         click.echo("All approvals cleared for this project.")
         return
 
@@ -993,9 +1019,10 @@ def reset_cmd(script: str | None, reset_all: bool) -> None:
 
     abs_path = resolve_path(script)
     key = project_key(abs_path)
-    hashes = load_hashes()
-    if key not in hashes:
-        raise click.ClickException(f"{script} is not tracked.")
-    del hashes[key]
-    save_hashes(hashes)
+    with _hash_store_lock():
+        hashes = load_hashes()
+        if key not in hashes:
+            raise click.ClickException(f"{script} is not tracked.")
+        del hashes[key]
+        _write_hashes(hashes)
     click.echo(f"Forgot approval for {script}")

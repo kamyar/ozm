@@ -108,7 +108,24 @@ entrypoint_redirects:
     guidance: Invoke the installed example inspection entry point directly.
 ```
 
-A redirect detects direct script, Python module, and uv-wrapped Python module forms. It stops before approval and prints the direct `ozm cmd` form. It does not authorize the target. Add target authorization separately to `allowed_commands` only when appropriate.
+A redirect detects direct scripts, Python script and module forms, and their `uv run` wrappers. It parses value options such as `--with PACKAGE` without treating dependency names or child arguments as commands. It stops before approval and prints the direct `ozm cmd` form. It does not authorize the target. Add target authorization separately to `allowed_commands` only when appropriate.
+
+For a local script that must retain content review, set `target_family: run` and use a normalized absolute script path:
+
+```yaml
+entrypoint_redirects:
+  - id: example-export-script
+    target_family: run
+    target: /Users/you/.local/bin/example-export
+    script_basenames:
+      - example-export.py
+      - example-export
+    guidance: Use the installed script through ozm run with its fixed Python environment.
+```
+
+The target should contain the complete tool, not a wrapper that imports or executes a mutable repository script. Give it an absolute interpreter shebang, such as `#!/Users/you/.local/share/example-venv/bin/python`. This avoids per-call `PATH` changes and dependency-runner wrappers. Ozm still reviews the target content and uses the project-scoped content hash cache. Changed URLs and other arguments do not require a new script approval; changed content does. Updating the repository source does not update the installed copy. Reinstall it explicitly when needed.
+
+File runs also apply entry-point redirects before cache and approval checks. An exact installed script target does not redirect itself. The default `target_family` remains `cmd`, whose target must be one executable name.
 
 Pack names cannot contain paths. Ozm never discovers packs in a repository. Enabled packs load only from the private Ozm directory. Missing packs, symlinks, unsupported versions, unknown fields, and malformed rules fail closed before command execution.
 
@@ -173,6 +190,7 @@ flowchart TD
 | `config.yaml` | Global command allowlists and blocklists |
 | `projects/<name>-<hash>.yaml` | Per-project config (allowlists, blocklists, commit rules) |
 | `hashes.yaml` | Project-scoped SHA-256 hashes of approved scripts and commands |
+| `hashes.yaml.lock` | Private lock for approval-cache updates and resets |
 | `snapshots/` | Last-approved script contents used for changed-script diffs |
 | `audit.log` | Append-only log of all approvals, denials, and blocks |
 | `hooks/enforce.sh` | The PreToolUse hook script installed by `ozm install` |
@@ -188,6 +206,8 @@ Keys are formatted as `<project_root>:<path_or_command>`:
 ```
 
 Approvals are project-scoped — approving `pytest` in one project does not carry over to another.
+
+After an approval dialog, Ozm locks the cache and merges only the newly approved entry into the latest state. It does not write the stale cache copy from before the dialog. Resets use the same lock. Parallel agents therefore preserve each other's approvals and do not restore unrelated entries that were reset while a dialog was open. The lock is not held during approval dialogs or command execution.
 
 ### audit.log
 

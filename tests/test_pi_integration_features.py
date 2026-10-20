@@ -161,7 +161,8 @@ class StdinShellTests(unittest.TestCase):
         completed = subprocess.CompletedProcess(args=[], returncode=0)
         saved_hashes = {}
 
-        def fake_save_hashes(hashes):
+        def fake_save_hashes(hashes, *, merge=False):
+            self.assertTrue(merge)
             saved_hashes.update(hashes)
 
         with patch.object(run_mod, "load_hashes", return_value={}), \

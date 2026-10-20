@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import copy
 import json
 import os
 import unittest
@@ -65,6 +66,40 @@ class RulePackLoadingTests(unittest.TestCase):
         self.assertEqual(redirects[0].source, "work")
         self.assertEqual(redirects[0].target, "example-inspect")
         self.assertEqual(redirects[0].python_modules, ("example_inspect",))
+
+    def test_loads_hash_reviewed_script_target(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            root = os.path.abspath("private")
+            payload = copy.deepcopy(VALID_PACK)
+            payload["entrypoint_redirects"][0].update(
+                target_family="run", target="/opt/local/lib/example-inspect",
+            )
+            self.write_pack(root, payload=payload)
+            redirects = self.load_from(root, global_config={"rule_packs": ["work"]})
+        self.assertEqual(redirects[0].target_family, "run")
+        self.assertEqual(redirects[0].target, "/opt/local/lib/example-inspect")
+
+    def test_invalid_script_targets_fail_closed(self):
+        cases = [
+            ("shell", "/opt/local/lib/example-inspect"),
+            ("run", "example-inspect"),
+            ("run", "~/bin/example-inspect"),
+            ("run", "/opt/local/../example-inspect"),
+            ("run", "/opt/local/lib/example\ninspect"),
+            ("run", "/opt/local/lib/example\x00inspect"),
+            ("run", None),
+            ("cmd", "/opt/local/lib/example-inspect"),
+        ]
+        runner = CliRunner()
+        for family, target in cases:
+            with self.subTest(family=family, target=target), runner.isolated_filesystem():
+                root = os.path.abspath("private")
+                payload = copy.deepcopy(VALID_PACK)
+                payload["entrypoint_redirects"][0].update(target_family=family, target=target)
+                self.write_pack(root, payload=payload)
+                with self.assertRaises(RuntimeError):
+                    self.load_from(root, global_config={"rule_packs": ["work"]})
 
     def test_project_and_global_pack_names_are_deduplicated(self):
         runner = CliRunner()

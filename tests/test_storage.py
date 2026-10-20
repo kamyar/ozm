@@ -8,6 +8,43 @@ from ozm import storage as storage_mod
 
 
 class StorageNoFollowTests(unittest.TestCase):
+    def test_lock_rejects_symlinks_hardlinks_and_nonregular_files(self):
+        runner = CliRunner()
+        for kind in ("symlink", "hardlink", "fifo"):
+            with self.subTest(kind=kind), runner.isolated_filesystem():
+                directory = os.path.abspath("state")
+                os.mkdir(directory)
+                lock = os.path.join(directory, "state.lock")
+                victim = os.path.abspath("victim")
+                with open(victim, "w") as file:
+                    file.write("unchanged")
+                original_mode = os.stat(victim).st_mode
+                if kind == "symlink":
+                    os.symlink(victim, lock)
+                elif kind == "hardlink":
+                    os.link(victim, lock)
+                else:
+                    os.mkfifo(lock)
+                with self.assertRaises(RuntimeError):
+                    with storage_mod.exclusive_storage_lock(lock, directory=directory, label="state lock"):
+                        self.fail("unsafe lock was acquired")
+                with open(victim) as file:
+                    self.assertEqual(file.read(), "unchanged")
+                self.assertEqual(os.stat(victim).st_mode, original_mode)
+
+    def test_lock_is_persistent_and_released_after_exception(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            directory = os.path.abspath("state")
+            lock = os.path.join(directory, "state.lock")
+            with self.assertRaises(ValueError):
+                with storage_mod.exclusive_storage_lock(lock, directory=directory, label="state lock"):
+                    inode = os.stat(lock).st_ino
+                    raise ValueError("test")
+            with storage_mod.exclusive_storage_lock(lock, directory=directory, label="state lock"):
+                self.assertEqual(os.stat(lock).st_ino, inode)
+            self.assertTrue(os.path.isfile(lock))
+
     def test_save_replaces_swapped_destination_symlink_without_following(self):
         runner = CliRunner()
         with runner.isolated_filesystem():

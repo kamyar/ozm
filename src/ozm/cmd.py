@@ -20,6 +20,7 @@ from ozm.exit_codes import BLOCKED, CONFIG_ERROR, DENIED, NO_DIALOG, click_error
 from ozm.command_routing import (
     configured_entrypoint_redirect,
     entrypoint_suggestion,
+    script_command_argv,
 )
 from ozm.config import (
     _command_start_index,
@@ -402,6 +403,7 @@ EXTENSION_SHEBANGS = {
 
 def _detect_inline_code(args: tuple[str, ...]) -> str | None:
     """Return interpreter name if args look like inline code (e.g. python -c 'code')."""
+    args = tuple(script_command_argv(list(args)))
     interpreter = None
     for arg in args:
         if arg in WRAPPERS:
@@ -437,6 +439,9 @@ def _find_script_in_args(
     args: tuple[str, ...],
 ) -> tuple[str, str, tuple[str, ...]] | None:
     """Return the script, suggested shebang, and script arguments."""
+    args = tuple(script_command_argv(list(args)))
+    if args and args[0] not in WRAPPERS and (shebang := _script_shebang(args[0])):
+        return args[0], shebang, args[1:]
     interpreter = None
     saw_wrapper = False
     for index, arg in enumerate(args):
@@ -994,9 +999,8 @@ def _cmd_impl(
                 )
         run_key = project_key(CMD_PREFIX + run_command)
         run_hash = _cmd_hash(run_command)
-        hashes[run_key] = run_hash
         try:
-            save_hashes(hashes)
+            save_hashes({run_key: run_hash}, merge=True)
         except (OSError, RuntimeError) as exc:
             audit_log("error", audit_kind, run_command, str(exc))
             raise click_error(

@@ -8,7 +8,7 @@ import shlex
 from dataclasses import dataclass
 
 from ozm.agent import AgentMetadata
-from ozm.config import _command_start_index
+from ozm.config import _command_start_index, _is_env_assignment
 from ozm.rule_packs import EntrypointRedirectRule, load_entrypoint_redirects
 
 
@@ -34,22 +34,28 @@ def _python_module_arguments(
 
 
 _UV_RUN_VALUE_OPTIONS = {
+    "--cache-dir",
+    "--color",
     "--config-file",
     "--default-index",
     "--directory",
     "--env-file",
+    "--exclude",
     "--extra",
     "--extra-index-url",
     "--find-links",
+    "--group",
     "--index",
     "--index-strategy",
     "--index-url",
     "--keyring-provider",
     "--link-mode",
+    "--no-group",
     "--package",
     "--project",
     "--python",
     "--python-platform",
+    "--python-preference",
     "--resolution",
     "--torch-backend",
     "--with",
@@ -81,36 +87,74 @@ def _uv_run_command(tokens: list[str]) -> list[str]:
     return []
 
 
+def is_explicit_shebang_script(path: str) -> bool:
+    """Identify explicit script paths, not local namesakes of installed commands."""
+    if os.path.sep not in path or not os.path.isfile(path):
+        return False
+    try:
+        with open(path, "rb") as file:
+            return file.read(2) == b"#!"
+    except OSError:
+        return False
+
+
+def script_command_argv(argv: list[str]) -> list[str]:
+    """Unwrap environment prefixes and uv run without hiding wrapper scripts.
+
+    This is a block-only routing helper, never an authorization classifier.
+    Bare uv/env names keep their installed-command routing; execution resolves
+    them through PATH, not a namesake file in the working directory. Explicit
+    script paths retain content review. Each iteration consumes tokens, so
+    nested wrappers need no depth cutoff.
+    """
+    while argv:
+        start = 0
+        while start < len(argv) and _is_env_assignment(argv[start]):
+            start += 1
+        if start < len(argv) and is_explicit_shebang_script(argv[start]):
+            return argv[start:]
+        start = _command_start_index(argv)
+        if start is None:
+            return []
+        argv = argv[start:]
+        if is_explicit_shebang_script(argv[0]):
+            return argv
+        if os.path.basename(argv[0]) != "uv" or argv[1:2] != ["run"]:
+            return argv
+        argv = _uv_run_command(argv[1:])
+    return []
+
+
 def configured_entrypoint_redirect(
     argv: list[str],
     *,
     rules: tuple[EntrypointRedirectRule, ...] | None = None,
 ) -> EntrypointRedirect | None:
     """Return the first enabled local entry-point redirect that matches argv."""
-    start = _command_start_index(argv)
-    if start is None:
-        return None
-    command = os.path.basename(argv[start])
-    rest = argv[start + 1:]
-
     if rules is None:
         rules = load_entrypoint_redirects()
+    argv = script_command_argv(argv)
+    if not argv:
+        return None
+    command = os.path.basename(argv[0])
+    rest = argv[1:]
+
     for rule in rules:
+        if rule.target_family == "run" and os.path.abspath(argv[0]) == rule.target:
+            continue
         if command in rule.script_basenames:
             return EntrypointRedirect(rule=rule, arguments=tuple(rest))
         if command in {"python", "python3"}:
             arguments = _python_module_arguments(rest, rule.python_modules)
             if arguments is not None:
                 return EntrypointRedirect(rule=rule, arguments=arguments)
-        if command == "uv" and rest[:1] == ["run"]:
-            uv_command = _uv_run_command(rest)
-            if uv_command and os.path.basename(uv_command[0]) in {"python", "python3"}:
-                arguments = _python_module_arguments(
-                    uv_command[1:],
-                    rule.python_modules,
-                )
-                if arguments is not None:
-                    return EntrypointRedirect(rule=rule, arguments=arguments)
+            script_args = rest[1:] if rest[:1] == ["--"] else rest
+            if (
+                script_args
+                and not script_args[0].startswith("-")
+                and os.path.basename(script_args[0]) in rule.script_basenames
+            ):
+                return EntrypointRedirect(rule=rule, arguments=tuple(script_args[1:]))
     return None
 
 
@@ -121,7 +165,7 @@ def entrypoint_suggestion(
     """Build a shell-safe direct command for a matched local redirect."""
     return shlex.join([
         "ozm",
-        "cmd",
+        redirect.rule.target_family,
         "--agent-name",
         agent.name,
         "--agent-description",

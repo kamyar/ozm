@@ -37,6 +37,7 @@ class EntrypointRedirectRule:
     python_modules: tuple[str, ...]
     script_basenames: tuple[str, ...]
     guidance: str
+    target_family: str = "cmd"
 
 
 def _string_list(value: object, *, field: str, limit: int) -> tuple[str, ...]:
@@ -80,6 +81,7 @@ def _parse_redirect(pack: str, index: int, value: object) -> EntrypointRedirectR
     allowed_keys = {
         "id",
         "target",
+        "target_family",
         "python_modules",
         "script_basenames",
         "guidance",
@@ -91,9 +93,20 @@ def _parse_redirect(pack: str, index: int, value: object) -> EntrypointRedirectR
     rule_id = value.get("id")
     if not isinstance(rule_id, str) or not _RULE_ID.fullmatch(rule_id):
         raise RuntimeError(f"{field}.id is invalid")
+    target_family = value.get("target_family", "cmd")
+    if target_family not in ("cmd", "run"):
+        raise RuntimeError(f"{field}.target_family must be cmd or run")
     target = value.get("target")
-    if not isinstance(target, str) or not _EXECUTABLE.fullmatch(target):
-        raise RuntimeError(f"{field}.target must be one executable name")
+    if target_family == "cmd":
+        if not isinstance(target, str) or not _EXECUTABLE.fullmatch(target):
+            raise RuntimeError(f"{field}.target must be one executable name")
+    elif (
+        not isinstance(target, str)
+        or not os.path.isabs(target)
+        or os.path.normpath(target) != target
+        or any(ord(char) < 32 or ord(char) == 127 for char in target)
+    ):
+        raise RuntimeError(f"{field}.target must be a normalized absolute script path")
 
     modules = _string_list(
         value.get("python_modules"),
@@ -141,6 +154,7 @@ def _parse_redirect(pack: str, index: int, value: object) -> EntrypointRedirectR
         python_modules=modules,
         script_basenames=basenames,
         guidance=guidance.strip(),
+        target_family=target_family,
     )
 
 

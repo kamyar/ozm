@@ -275,6 +275,163 @@ class CmdTests(unittest.TestCase):
             )
             self.assertIsNone(cmd_mod._find_script_in_args(("tool",)))
 
+    def test_uv_options_do_not_hide_script_content(self):
+        runner = CliRunner()
+        cases = [
+            ("uv", "run", "--no-project", "--with", "httpx", "--with", "rich"),
+            ("uv", "run", "--with=httpx", "--python", "3.12", "--"),
+            ("uv", "run", "--project", "/work", "--group", "dev"),
+            ("/opt/homebrew/bin/uv", "run", "--directory=/work", "--quiet"),
+            ("env", "MODE=test", "uv", "run", "--with", "httpx"),
+        ]
+        with runner.isolated_filesystem():
+            with open("script.py", "w") as file:
+                file.write("#!/usr/bin/env python3\nprint('one')\nprint('two')\n")
+            for prefix in cases:
+                with self.subTest(prefix=prefix), \
+                     patch.object(cmd_mod, "is_command_blocked") as blocked, \
+                     patch.object(cmd_mod, "is_command_allowed") as allowed, \
+                     patch.object(cmd_mod, "load_hashes") as hashes, \
+                     patch.object(cmd_mod, "request_cmd_approval") as approval, \
+                     patch.object(cmd_mod, "_run_command") as execute, \
+                     patch.object(cmd_mod, "audit_log"):
+                    result = runner.invoke(
+                        cmd_mod.cmd_cmd,
+                        [*META, *prefix, "script.py", "https://metrics.example/?a=1&b=2"],
+                    )
+                self.assertEqual(result.exit_code, cmd_mod.BLOCKED, result.output)
+                self.assertIn("ozm run", result.output)
+                self.assertIn("script.py 'https://metrics.example/?a=1&b=2'", result.output)
+                blocked.assert_not_called()
+                allowed.assert_not_called()
+                hashes.assert_not_called()
+                approval.assert_not_called()
+                execute.assert_not_called()
+
+    def test_local_wrapper_scripts_are_reviewed_before_unwrapping(self):
+        runner = CliRunner()
+        cases = [
+            (("./uv", "run", "echo", "ok"), "./uv", ("run", "echo", "ok")),
+            (("./env", "echo", "ok"), "./env", ("echo", "ok")),
+            (("/usr/bin/env", "MODE=read", "./uv", "run", "echo", "ok"), "./uv", ("run", "echo", "ok")),
+            (("/opt/homebrew/bin/uv", "run", "./env", "echo", "ok"), "./env", ("echo", "ok")),
+            (("/opt/homebrew/bin/uv", "run", "./uv", "run", "echo", "ok"), "./uv", ("run", "echo", "ok")),
+        ]
+        with runner.isolated_filesystem():
+            for name in ("uv", "env"):
+                with open(name, "w") as file:
+                    file.write("#!/usr/bin/env sh\necho one\necho two\n")
+                os.chmod(name, 0o700)
+            for args, script, script_args in cases:
+                with self.subTest(args=args), \
+                     patch.object(cmd_mod, "is_command_allowed") as allowed, \
+                     patch.object(cmd_mod, "load_hashes") as hashes, \
+                     patch.object(cmd_mod, "request_cmd_approval") as approval, \
+                     patch.object(cmd_mod, "_run_command") as execute, \
+                     patch.object(cmd_mod, "audit_log"):
+                    result = runner.invoke(cmd_mod.cmd_cmd, [*META, *args])
+                self.assertEqual(result.exit_code, cmd_mod.BLOCKED, result.output)
+                self.assertIn("ozm run", result.output)
+                self.assertEqual(
+                    cmd_mod._find_script_in_args(args),
+                    (script, "#!/usr/bin/env sh", script_args),
+                )
+                allowed.assert_not_called()
+                hashes.assert_not_called()
+                approval.assert_not_called()
+                execute.assert_not_called()
+
+    def test_bare_wrapper_names_do_not_inspect_unrelated_cwd_files(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            os.mkdir("bin")
+            bin_path = os.path.abspath("bin")
+            for name in ("uv", "env"):
+                with open(name, "w") as file:
+                    file.write("#!/usr/bin/env sh\necho unrelated\n")
+                with open(os.path.join(bin_path, name), "wb") as file:
+                    file.write(b"\x7fELF-native-test-fixture")
+                os.chmod(os.path.join(bin_path, name), 0o700)
+            with patch.dict(os.environ, {"PATH": bin_path}):
+                for args in (
+                    ("uv", "run", "echo", "ok"),
+                    ("uv", "help"),
+                    ("env", "uv", "run", "echo", "ok"),
+                ):
+                    with self.subTest(args=args):
+                        self.assertIsNone(cmd_mod._find_script_in_args(args))
+                for name in ("uv", "env"):
+                    self.assertEqual(
+                        cmd_mod._find_script_in_args((f"./{name}", "--quick")),
+                        (f"./{name}", "#!/usr/bin/env sh", ("--quick",)),
+                    )
+
+    def test_installed_wrapper_names_still_check_the_child_script(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            os.mkdir("bin")
+            bin_path = os.path.abspath("bin")
+            for name in ("uv", "env"):
+                with open(name, "w") as file:
+                    file.write("#!/usr/bin/env sh\necho unrelated\n")
+                path = os.path.join(bin_path, name)
+                with open(path, "w") as file:
+                    file.write("#!/usr/bin/env sh\nexec installed-tool \"$@\"\n")
+                os.chmod(path, 0o700)
+            with open("script.py", "w") as file:
+                file.write("#!/usr/bin/env python3\nprint('child script')\n")
+            with patch.dict(os.environ, {"PATH": bin_path}):
+                for prefix in (("uv", "run"), ("env", "MODE=read", "uv", "run")):
+                    with self.subTest(prefix=prefix):
+                        self.assertEqual(
+                            cmd_mod._find_script_in_args((*prefix, "script.py", "--quick")),
+                            ("script.py", "#!/usr/bin/env python3", ("--quick",)),
+                        )
+
+    def test_deep_uv_wrappers_do_not_hide_script_or_inline_code(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            with open("script.py", "w") as file:
+                file.write("#!/usr/bin/env python3\nprint('one')\nprint('two')\n")
+            for depth in (8, 9, 100):
+                prefix = ("uv", "run") * depth
+                with self.subTest(depth=depth):
+                    self.assertEqual(
+                        cmd_mod._find_script_in_args((*prefix, "script.py", "--quick")),
+                        ("script.py", "#!/usr/bin/env python3", ("--quick",)),
+                    )
+                    self.assertEqual(
+                        cmd_mod._detect_inline_code((*prefix, "python3", "-c", "print(1)")),
+                        "python3",
+                    )
+
+    def test_uv_options_do_not_hide_inline_code(self):
+        with patch.object(cmd_mod, "request_cmd_approval") as approval, \
+             patch.object(cmd_mod, "_run_command") as execute:
+            result = CliRunner().invoke(
+                cmd_mod.cmd_cmd,
+                [*META, "uv", "run", "--with", "httpx", "python3", "-c", "print(1)"],
+            )
+        self.assertNotEqual(result.exit_code, 0)
+        self.assertIn("write the code to a script file", result.output)
+        approval.assert_not_called()
+        execute.assert_not_called()
+
+    def test_uv_detection_stops_at_the_child_command(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            with open("script.py", "w") as file:
+                file.write("print('hello')\n")
+            for args in (
+                ("uv", "run", "--with", "httpx", "echo", "script.py"),
+                ("uv", "run", "--", "echo", "python3", "-c", "print(1)"),
+                ("uv", "run", "--with", "script.py", "pytest", "script.py"),
+                ("uv", "run", "--with"),
+            ):
+                with self.subTest(args=args):
+                    self.assertIsNone(cmd_mod._find_script_in_args(args))
+                    self.assertIsNone(cmd_mod._detect_inline_code(args))
+
     def test_cmd_rejects_uv_run_py_script(self):
         runner = CliRunner()
         with runner.isolated_filesystem():

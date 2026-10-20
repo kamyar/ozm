@@ -1,7 +1,10 @@
 import os
 import stat
 import subprocess
+import threading
+import time
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from unittest.mock import ANY, patch
 
@@ -248,6 +251,36 @@ class DirectOzmScriptTests(unittest.TestCase):
         load_hashes.assert_not_called()
         request_approval.assert_not_called()
 
+    def test_environment_prefixed_ozm_wrapper_stops_before_cached_approval(self):
+        commands = [
+            "PATH=/opt/local/venv/bin:$PATH ozm run script.py --describe",
+            "MODE=read ozm status",
+            "env PATH=/opt/local/venv/bin:$PATH ozm run script.py --quick",
+            "env -u PYTHONPATH MODE=read ozm status",
+            "MODE=one ozm status && MODE=two ozm tips",
+        ]
+        for command in commands:
+            with self.subTest(command=command), \
+                 patch.object(run_mod, "load_hashes") as hashes, \
+                 patch.object(run_mod, "request_approval") as approval, \
+                 patch.object(run_mod, "_execute_script") as execute, \
+                 patch.object(run_mod, "audit_log"):
+                result = CliRunner().invoke(
+                    shell_mod.shell_cmd, ["--command", command, *META],
+                )
+            self.assertEqual(result.exit_code, run_mod.BLOCKED, result.output)
+            self.assertIn("only invoke ozm", result.output)
+            self.assertIn("fixed interpreter shebang", result.output)
+            hashes.assert_not_called()
+            approval.assert_not_called()
+            execute.assert_not_called()
+
+    def test_environment_prefix_is_not_automatic_authorization(self):
+        self.assertFalse(run_mod._all_ozm_invocations(["PATH=/custom/bin:$PATH other-tool query"]))
+        self.assertFalse(run_mod._all_ozm_invocations(["printf '%s' 'MODE=read ozm status'"]))
+        self.assertFalse(run_mod._all_ozm_invocations(["MODE=read ozm status && other-tool query"]))
+        self.assertFalse(run_mod._all_ozm_invocations(["MODE=read"]))
+
     def test_in_memory_shell_nudges_final_head_pipeline(self):
         with patch.object(run_mod, "load_hashes") as load_hashes, \
              patch.object(run_mod, "request_approval") as request_approval, \
@@ -462,6 +495,8 @@ class DirectOzmScriptTests(unittest.TestCase):
             "cd /tmp && bash tools/githooks/install.sh",
             "source tools/gitworktree/bootstrap-worktree.sh",
             "./scripts/check.py --quick",
+            "uv run --no-project --with httpx scripts/check.py --quick",
+            "MODE=read uv run --with=httpx python3 scripts/check.py --quick",
         ]
         for command in cases:
             with self.subTest(command=command), \
@@ -480,6 +515,25 @@ class DirectOzmScriptTests(unittest.TestCase):
                 self.assertIn("--cwd /tmp", result.output)
             load_hashes.assert_not_called()
             request_approval.assert_not_called()
+
+    def test_generated_shell_does_not_hide_local_wrapper_scripts(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            for name in ("uv", "env"):
+                with open(name, "w") as file:
+                    file.write("#!/usr/bin/env sh\nprintf one\nprintf two\n")
+                with self.subTest(name=name), \
+                     patch.object(run_mod, "load_hashes") as hashes, \
+                     patch.object(run_mod, "request_approval") as approval, \
+                     patch.object(run_mod, "audit_log"):
+                    result = runner.invoke(
+                        shell_mod.shell_cmd,
+                        ["--command", f"./{name} run echo ok", *META],
+                    )
+                self.assertEqual(result.exit_code, run_mod.BLOCKED, result.output)
+                self.assertIn("review only the wrapper", result.output)
+                hashes.assert_not_called()
+                approval.assert_not_called()
 
     def test_quoted_operator_text_redirects_to_direct_command(self):
         with patch.object(run_mod, "load_hashes") as load_hashes, \
@@ -621,6 +675,32 @@ class OneCommandScriptTests(unittest.TestCase):
 
 
 class HashStorePersistenceTests(unittest.TestCase):
+    def test_parallel_approval_merges_preserve_every_entry(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            ozm_dir = os.path.abspath("ozm")
+            barrier = threading.Barrier(8)
+            real_write = run_mod._write_hashes
+
+            def slow_write(hashes):
+                # Force overlap if the read-modify-write lock is removed.
+                time.sleep(0.01)
+                real_write(hashes)
+
+            def approve(index):
+                barrier.wait(timeout=5)
+                run_mod.save_hashes({f"project-{index}\0script": str(index)}, merge=True)
+
+            with patch.object(run_mod, "OZM_DIR", ozm_dir), \
+                 patch.object(run_mod, "HASH_FILE", os.path.join(ozm_dir, "hashes.yaml")), \
+                 patch.object(run_mod, "_write_hashes", side_effect=slow_write):
+                run_mod.save_hashes({"existing": "digest"})
+                with ThreadPoolExecutor(max_workers=8) as pool:
+                    list(pool.map(approve, range(8)))
+                hashes = run_mod.load_hashes()
+            self.assertEqual(hashes, {"existing": "digest", **{f"project-{i}\0script": str(i) for i in range(8)}})
+            self.assertEqual(stat.S_IMODE(os.stat(os.path.join(ozm_dir, "hashes.yaml.lock")).st_mode), 0o600)
+
     def test_save_hashes_refuses_symlinked_ozm_dir(self):
         runner = CliRunner()
         with runner.isolated_filesystem():
@@ -822,6 +902,59 @@ class HashStorePersistenceTests(unittest.TestCase):
 
 
 class ApprovalCacheBehaviorTests(unittest.TestCase):
+    def test_pending_script_approval_preserves_new_approvals_and_resets(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            os.mkdir(".git")
+            script = self.write_script("script.sh")
+            ozm_dir = os.path.abspath("ozm")
+            peer_key = "/other/project\0peer.sh"
+            script_key = run_mod.project_key(script)
+            script_hash = run_mod.compute_hash(script)
+            with patch.object(run_mod, "OZM_DIR", ozm_dir), \
+                 patch.object(run_mod, "HASH_FILE", os.path.join(ozm_dir, "hashes.yaml")), \
+                 patch.object(run_mod, "save_snapshot"), \
+                 patch.object(run_mod, "_execute_script", side_effect=SystemExit(0)), \
+                 patch.object(run_mod, "audit_log"):
+                run_mod.save_hashes({"removed-while-waiting": "old"})
+
+                def approve(*_args, **_kwargs):
+                    # Another process approved a file and reset the old entry.
+                    run_mod.save_hashes({peer_key: "peer-digest"})
+                    return ApprovalResult(approved=True)
+
+                with patch.object(run_mod, "request_approval", side_effect=approve):
+                    result = runner.invoke(run_mod.run_cmd, [*META, script])
+                hashes = run_mod.load_hashes()
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertEqual(hashes, {peer_key: "peer-digest", script_key: script_hash})
+
+    def test_pending_command_approval_preserves_new_approvals_and_resets(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            os.mkdir(".git")
+            ozm_dir = os.path.abspath("ozm")
+            peer_key = "/other/project\0peer.sh"
+            command = "example-query --summary"
+            with patch.object(run_mod, "OZM_DIR", ozm_dir), \
+                 patch.object(run_mod, "HASH_FILE", os.path.join(ozm_dir, "hashes.yaml")), \
+                 patch.object(cmd_mod, "is_command_blocked", return_value=None), \
+                 patch.object(cmd_mod, "is_command_allowed", return_value=False), \
+                 patch.object(cmd_mod, "_run_command", return_value=subprocess.CompletedProcess([], 0)), \
+                 patch.object(cmd_mod, "audit_log"):
+                run_mod.save_hashes({"removed-while-waiting": "old"})
+
+                def approve(*_args, **_kwargs):
+                    run_mod.save_hashes({peer_key: "peer-digest"})
+                    return ApprovalResult(approved=True)
+
+                with patch.object(cmd_mod, "request_cmd_approval", side_effect=approve):
+                    result = runner.invoke(cmd_mod.cmd_cmd, [*META, "example-query", "--summary"])
+                hashes = run_mod.load_hashes()
+                key = run_mod.project_key("cmd:" + command)
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertEqual(hashes, {peer_key: "peer-digest", key: cmd_mod._cmd_hash(command)})
+
     def write_script(self, path: str, body: str = "echo hi") -> str:
         with open(path, "w") as f:
             f.write(f"#!/usr/bin/env sh\n{body}\n:\n")

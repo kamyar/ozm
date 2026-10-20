@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import errno
+import fcntl
 import os
 import secrets
 import stat
+from contextlib import contextmanager
 
 import yaml
 
@@ -147,6 +149,39 @@ def _create_temp_file(dir_fd: int, basename: str) -> tuple[str, int]:
         except FileExistsError:
             continue
     raise FileExistsError(f"could not create unique temporary file for {basename}")
+
+
+@contextmanager
+def exclusive_storage_lock(path: str, *, directory: str, label: str):
+    """Serialize state updates with a persistent, private lock inode.
+
+    Never unlink the lock file: other processes can already be waiting on it.
+    Do not hold this lock while waiting for approval or executing a command.
+    """
+    basename = _ensure_path_is_in_directory(path, directory)
+    dir_fd = _open_storage_directory(directory, label, create=True)
+    fd = None
+    try:
+        flags = os.O_RDWR | os.O_CREAT | os.O_NONBLOCK
+        flags |= getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+        try:
+            fd = os.open(basename, flags, 0o600, dir_fd=dir_fd)
+        except OSError as exc:
+            if exc.errno in {errno.ELOOP, errno.ENOTDIR}:
+                raise RuntimeError(f"refusing to use symlinked {label}: {path}") from exc
+            raise
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_uid != os.getuid():
+            raise RuntimeError(f"refusing to use unsafe {label}: {path}")
+        os.fchmod(fd, 0o600)
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        try:
+            if fd is not None:
+                os.close(fd)
+        finally:
+            os.close(dir_fd)
 
 
 def save_bytes_atomic_no_follow(
