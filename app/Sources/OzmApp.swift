@@ -6,14 +6,22 @@ final class AppState: ObservableObject {
     let queue = ApprovalQueue()
     let server = SocketServer()
     let windowManager = ApprovalWindowManager()
+    private var menuBarController: MenuBarController?
 
     func start() {
-        guard !server.isRunning else { return }
+        guard menuBarController == nil else { return }
         queue.windowManager = windowManager
         server.start(queue: queue)
+        menuBarController = MenuBarController(
+            queue: queue,
+            server: server,
+            windowManager: windowManager
+        )
     }
 
     func stop() {
+        menuBarController?.stop()
+        menuBarController = nil
         windowManager.closeAll()
         server.stop()
     }
@@ -41,17 +49,6 @@ struct OzmApp: App {
     @StateObject private var state = AppState()
 
     var body: some Scene {
-        MenuBarExtra {
-            MenuBarView(
-                queue: state.queue,
-                server: state.server,
-                windowManager: state.windowManager
-            )
-        } label: {
-            MenuBarLabel(queue: state.queue)
-        }
-        .menuBarExtraStyle(.window)
-
         Settings {
             SettingsView(server: state.server)
         }
@@ -61,20 +58,5 @@ struct OzmApp: App {
         let state = AppState()
         _state = StateObject(wrappedValue: state)
         AppDelegate.shared = state
-    }
-}
-
-struct MenuBarLabel: View {
-    @ObservedObject var queue: ApprovalQueue
-
-    var body: some View {
-        HStack(spacing: 2) {
-            Image(systemName: "shield.checkered")
-            if queue.pendingCount > 0 {
-                Text("\(queue.pendingCount)")
-                    .font(.caption2)
-                    .monospacedDigit()
-            }
-        }
     }
 }

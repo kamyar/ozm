@@ -37,6 +37,10 @@ class ApprovalResult(NamedTuple):
     allow_pattern: str | None = None
     block_pattern: str | None = None
     apply_globally: bool = False
+    hands_free: bool = False
+
+    def audit_action(self, manual_action: str) -> str:
+        return "hands-free" if self.hands_free else manual_action
 
 
 def _get_git_diff(path: str) -> str | None:
@@ -85,6 +89,7 @@ def _parse_socket_response(resp: dict | None) -> ApprovalResult | None:
         allow_pattern=resp.get("allow_pattern") or None,
         block_pattern=resp.get("block_pattern") or None,
         apply_globally=resp.get("apply_globally", False),
+        hands_free=approved is True and resp.get("hands_free") is True,
     )
 
 

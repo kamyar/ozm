@@ -18,6 +18,14 @@ final class ApprovalQueue: ObservableObject {
             }
         }
     }
+    // Session-only. Never restore automatic approval after an app restart.
+    @Published var isHandsFree: Bool = false {
+        didSet {
+            if isHandsFree {
+                approveAllPending()
+            }
+        }
+    }
     var windowManager: ApprovalWindowPresenting?
 
     var pendingCount: Int { pending.count }
@@ -26,6 +34,10 @@ final class ApprovalQueue: ObservableObject {
         _ request: ApprovalRequest,
         continuation: CheckedContinuation<ApprovalResponse, Never>
     ) {
+        if isHandsFree {
+            continuation.resume(returning: handsFreeResponse(for: request))
+            return
+        }
         let wasEmpty = pending.isEmpty
         let item = PendingApproval(
             id: UUID(uuidString: request.id) ?? UUID(),
@@ -81,8 +93,27 @@ final class ApprovalQueue: ObservableObject {
         pending.removeAll()
     }
 
+    private func handsFreeResponse(for request: ApprovalRequest) -> ApprovalResponse {
+        ApprovalResponse(
+            id: request.id,
+            decision: .allow,
+            command: request.payload.command,
+            handsFree: true
+        )
+    }
+
+    private func approveAllPending() {
+        // Drain together so resolving one request cannot open the next window.
+        let items = pending
+        pending.removeAll()
+        windowManager?.closeAll()
+        for item in items {
+            item.continuation.resume(returning: handsFreeResponse(for: item.request))
+        }
+    }
+
     private func presentNextIfNeeded() {
-        guard !isDND, let next = pending.first else { return }
+        guard !isHandsFree, !isDND, let next = pending.first else { return }
         windowManager?.open(item: next, queue: self)
     }
 }

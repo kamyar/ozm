@@ -74,6 +74,16 @@ ozm doctor
 
 Configuration is optional. Without config, unknown commands and new or changed scripts go through the approval dialog. To pre-approve common safe commands or block known dangerous ones, create `.ozm.yaml`, run `ozm trust`, and use `ozm config` to see where the trusted copy lives.
 
+## Hands-free mode
+
+Start the menu bar app with `ozm app start`. Open its menu and turn on **Hands-free** to approve all pending and new approval requests without review. This includes commands, scripts, and one-time override requests in every project. A small blue dot beside the menu bar shield shows that the mode is on.
+
+Policy blocks and input validation remain active. Blocked operations still need `--reason` where an override is supported. Hands-free mode takes priority over DND. It starts off each time the app starts and has no CLI or repository setting.
+
+Automatic approvals do not add cache entries, script snapshots, or allowlist rules. Existing approvals remain unchanged. Turn the toggle off to restore normal review. Use `ozm app status` to check the mode and `ozm log --summary` to count hands-free approvals separately from manual approvals.
+
+> **Warning:** All approval requests are accepted while this mode is on, including destructive operations that reach an override request. Enable it only when you accept this risk. Update both the CLI and the app before use.
+
 ## Agent compatibility
 
 ozm works with any AI coding agent that executes shell commands:

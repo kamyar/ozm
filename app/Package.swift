@@ -9,5 +9,10 @@ let package = Package(
             name: "OzmApp",
             path: "Sources"
         ),
+        .testTarget(
+            name: "OzmAppTests",
+            dependencies: ["OzmApp"],
+            path: "Tests"
+        ),
     ]
 )

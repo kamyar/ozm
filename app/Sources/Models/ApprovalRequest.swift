@@ -78,6 +78,7 @@ struct ApprovalResponse: Codable, Sendable {
     var allowPattern: String?
     var blockPattern: String?
     var applyGlobally: Bool
+    var handsFree: Bool
 
     enum Decision: String, Codable, Sendable {
         case allow
@@ -91,6 +92,7 @@ struct ApprovalResponse: Codable, Sendable {
         case allowPattern = "allow_pattern"
         case blockPattern = "block_pattern"
         case applyGlobally = "apply_globally"
+        case handsFree = "hands_free"
     }
 
     init(
@@ -100,7 +102,8 @@ struct ApprovalResponse: Codable, Sendable {
         command: String? = nil,
         allowPattern: String? = nil,
         blockPattern: String? = nil,
-        applyGlobally: Bool = false
+        applyGlobally: Bool = false,
+        handsFree: Bool = false
     ) {
         self.version = 1
         self.id = id
@@ -110,5 +113,6 @@ struct ApprovalResponse: Codable, Sendable {
         self.allowPattern = allowPattern
         self.blockPattern = blockPattern
         self.applyGlobally = applyGlobally
+        self.handsFree = handsFree
     }
 }

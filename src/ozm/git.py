@@ -367,7 +367,7 @@ def _handle_violation(
     approval = request_override(command, violation, reason, agent)
 
     if approval.approved is True:
-        audit_log("override", "git", command, approval.feedback)
+        audit_log(approval.audit_action("override"), "git", command, approval.feedback)
         if approval.feedback:
             click.echo(f"ozm: override granted — {approval.feedback}", err=True)
         else:

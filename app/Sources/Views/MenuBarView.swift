@@ -8,6 +8,9 @@ struct MenuBarView: View {
     var body: some View {
         VStack(spacing: 0) {
             header
+            if queue.isHandsFree {
+                handsFreeStatus
+            }
             Divider()
             if queue.pending.isEmpty {
                 emptyState
@@ -18,30 +21,51 @@ struct MenuBarView: View {
             footer
         }
         .frame(width: 420)
-        .onAppear {
-            if !server.isRunning {
-                server.start(queue: queue)
-            }
-        }
+        .fixedSize(horizontal: true, vertical: true)
     }
 
     private var header: some View {
-        HStack {
+        HStack(spacing: 8) {
             Image(systemName: "shield.checkered")
                 .foregroundStyle(.secondary)
             Text("ozm")
                 .font(.headline)
-            Spacer()
-            Toggle("DND", isOn: $queue.isDND)
-                .toggleStyle(.switch)
-                .controlSize(.mini)
-                .labelsHidden()
-            Text("DND")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.primary)
+            Spacer(minLength: 16)
+            HStack(spacing: 6) {
+                Text("Hands-free")
+                Toggle("Hands-free", isOn: $queue.isHandsFree)
+                    .labelsHidden()
+                    .fixedSize()
+            }
+            .help("Approve all pending and new requests, including overrides. Policy blocks stay active. Automatic approvals are not cached.")
+            Divider()
+                .frame(height: 12)
+                .padding(.horizontal, 4)
+            HStack(spacing: 6) {
+                Text("DND")
+                Toggle("DND", isOn: $queue.isDND)
+                    .labelsHidden()
+                    .fixedSize()
+            }
+            .help("Pause approval windows. Hands-free mode takes priority.")
         }
+        .toggleStyle(MenuBarSwitchStyle())
+        .controlSize(.mini)
+        .font(.caption)
+        .foregroundStyle(.secondary)
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
+    }
+
+    private var handsFreeStatus: some View {
+        Label("Auto-approving all requests, including overrides", systemImage: "bolt.fill")
+            .font(.caption)
+            .foregroundStyle(.orange)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(Color.orange.opacity(0.08))
     }
 
     private var emptyState: some View {
@@ -54,7 +78,7 @@ struct MenuBarView: View {
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 32)
+        .padding(.vertical, 24)
     }
 
     private var approvalList: some View {

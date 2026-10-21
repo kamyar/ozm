@@ -125,6 +125,7 @@ def app_status():
             if agents:
                 click.echo(f"  agents: {', '.join(agents)}")
             click.echo(f"  dnd: {'on' if info.get('dnd') else 'off'}")
+            click.echo(f"  hands-free: {'on' if info.get('hands_free') else 'off'}")
         except (json.JSONDecodeError, TypeError):
             pass
 

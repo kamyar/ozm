@@ -23,6 +23,7 @@ _CONTEXT_FIELDS = {
 }
 _REASONS = {
     "clicked": "manual approval", "override": "one-time override",
+    "hands-free": "automatic approval in hands-free mode",
     "cached": "approval cache", "config": "command permission",
     "semantic": "proven read", "operation": "scoped operation permission",
     "denied": "manual denial", "blocked": "policy block",
@@ -219,6 +220,7 @@ def _summary(entries: list[dict]) -> dict:
     return {
         "entries": len(entries),
         "manual_approvals": len(approvals),
+        "hands_free_approvals": actions["hands-free"],
         "manual_denials": actions["denied"],
         "blocked_commands": actions["blocked"],
         "validation_failures": actions["invalid"],
@@ -276,6 +278,7 @@ def log_cmd(count: int | None, since: str | None, summary_output: bool, json_out
         click.echo(_selection_text(selection))
         for key, label in (
             ("entries", "entries"), ("manual_approvals", "manual approvals"),
+            ("hands_free_approvals", "hands-free approvals"),
             ("manual_denials", "manual denials"), ("blocked_commands", "blocked commands"),
             ("validation_failures", "validation failures"),
             ("generated_run_approvals", "generated run approvals"),

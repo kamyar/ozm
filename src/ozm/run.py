@@ -802,20 +802,21 @@ def _run_reviewed_script(
         )
 
         if approval.approved is True:
-            try:
-                save_hashes({key: current_hash}, merge=True)
-            except (OSError, RuntimeError) as exc:
-                log_review("error", str(exc))
-                raise click_error(
-                    f"could not save approval cache: {exc}. The script was NOT executed.",
-                    CONFIG_ERROR,
-                ) from exc
-            if not generated_review:
+            if not approval.hands_free:
                 try:
-                    save_snapshot(key, abs_path, content=content)
-                except (OSError, RuntimeError):
-                    pass
-            log_review("clicked", approval.feedback)
+                    save_hashes({key: current_hash}, merge=True)
+                except (OSError, RuntimeError) as exc:
+                    log_review("error", str(exc))
+                    raise click_error(
+                        f"could not save approval cache: {exc}. The script was NOT executed.",
+                        CONFIG_ERROR,
+                    ) from exc
+                if not generated_review:
+                    try:
+                        save_snapshot(key, abs_path, content=content)
+                    except (OSError, RuntimeError):
+                        pass
+            log_review(approval.audit_action("clicked"), approval.feedback)
             if approval.feedback:
                 click.echo(f"ozm: approved {display_name} — [user] {approval.feedback}", err=True)
             else:

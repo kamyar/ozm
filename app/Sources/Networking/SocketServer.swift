@@ -100,11 +100,15 @@ final class SocketServer: ObservableObject {
         readRequest(from: connection, id: connID)
     }
 
-    private func readRequest(from connection: NWConnection, id connID: UUID) {
-        connection.receive(minimumIncompleteLength: 1, maximumLength: 1_048_576) {
+    private func readRequest(
+        from connection: NWConnection,
+        id connID: UUID,
+        frame: RequestFrame = RequestFrame()
+    ) {
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 65_536) {
             [weak self] data, _, isComplete, error in
             Task { @MainActor [weak self] in
-                guard let self else { return }
+                guard let self, self.connections[connID] != nil else { return }
 
                 if let error {
                     print("ozm: connection read error: \(error)")
@@ -112,16 +116,17 @@ final class SocketServer: ObservableObject {
                     return
                 }
 
-                guard let data, !data.isEmpty else {
-                    self.removeConnection(connID)
+                var frame = frame
+                let jsonData: Data
+                switch frame.append(data ?? Data(), endOfStream: isComplete) {
+                case .waiting:
+                    self.readRequest(from: connection, id: connID, frame: frame)
                     return
-                }
-
-                guard let json = String(data: data, encoding: .utf8),
-                      let jsonData = json.trimmingCharacters(in: .whitespacesAndNewlines)
-                          .data(using: .utf8) else {
+                case .invalid:
                     self.sendError(on: connection, id: "unknown", connID: connID)
                     return
+                case .complete(let message):
+                    jsonData = message
                 }
 
                 let request: ApprovalRequest
@@ -162,6 +167,7 @@ final class SocketServer: ObservableObject {
             "pending_count": queue?.pendingCount ?? 0,
             "agents": Array(agents),
             "dnd": queue?.isDND ?? false,
+            "hands_free": queue?.isHandsFree ?? false,
         ]
 
         var response = ApprovalResponse(id: request.id, decision: .status)

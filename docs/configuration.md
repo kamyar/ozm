@@ -25,6 +25,12 @@ ozm: copied /Users/you/myproject/.ozm.yaml -> /Users/you/.ozm/projects/myproject
 
 After trusting, you can edit `~/.ozm/projects/myproject-*.yaml` directly. Allowlist and blocklist patterns added via the approval dialog are saved there automatically. If you check **Apply globally** in the dialog, the rule is saved to `~/.ozm/config.yaml` instead. If the rule field is blank, ozm saves the exact command globally.
 
+## Hands-free mode
+
+Hands-free mode is a session-only toggle in the menu bar app, not a configuration key. It starts off each time the app starts. When on, it approves all pending and new command, script, and override requests, including requests held by DND. It applies across projects. Policy blocks and input validation remain active.
+
+Automatic approvals do not change the approval cache, script snapshots, or allowlist rules. The audit action is `hands-free`, not `clicked` or `override`. See [commands.md](commands.md#ozm-app) for usage.
+
 ## Config options
 
 ### allowed_commands
@@ -228,4 +234,4 @@ The optional suffix is a versioned JSON object. New records include agent identi
 
 `ozm log --summary --since 3h` reports the selected UTC window and entry limit. It separates manual approvals, manual denials, policy blocks, validation failures, direct commands, scripts, and generated shell commands. JSON output includes structured selection details.
 
-Actions: `clicked` (user approved in dialog), `cached` (hash matched prior approval), `config` (matched allowlist), `semantic` (built-in read-only classifier), `override` (user-approved one-time override), `denied` (user denied in dialog), `blocked` (policy block), `invalid` (metadata validation failure), `error`, `no-dialog` (dialog could not be shown, command blocked)
+Actions: `clicked` (user approved in dialog), `hands-free` (automatic approval from the menu bar toggle), `cached` (hash matched prior approval), `config` (matched allowlist), `semantic` (built-in read-only classifier), `override` (user-approved one-time override), `denied` (user denied in dialog), `blocked` (policy block), `invalid` (metadata validation failure), `error`, `no-dialog` (dialog could not be shown, command blocked)

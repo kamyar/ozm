@@ -1,5 +1,25 @@
 # Commands
 
+## ozm app
+
+```bash
+ozm app start
+ozm app status
+ozm app stop
+```
+
+The menu bar has a **Hands-free** toggle. Turn it on to approve all pending and new command, script, and override requests without review. This applies to every project that uses the running app. A small blue dot beside the menu bar shield shows that the mode is active.
+
+Hands-free mode takes priority over DND. It does not change the DND setting. Turn it off to restore normal review. The mode starts off each time the app starts. There is no CLI option to enable it.
+
+Policy blocks and input validation remain active. An override-eligible blocked operation still needs `--reason`. Automatic approvals do not create approval-cache entries, script snapshots, or allowlist rules. Existing approvals remain unchanged. Update the CLI and the app together.
+
+`ozm app status` reports `hands-free: on` or `hands-free: off` when the app is running. `ozm log` records automatic decisions as `hands-free`. `ozm log --summary` counts them separately from manual approvals.
+
+To build the app from a source checkout, use `ozm app build`. To run its tests, use `ozm cmd --agent-name "Test app" --agent-description "Run approval queue tests." swift test --package-path app`. Tests use Swift Testing and require Swift 6 or later with a compatible macOS SDK.
+
+---
+
 ## ozm run
 
 Run a script after content review. The script's SHA-256 hash is recorded on first approval — subsequent runs of the same unmodified file execute immediately.
@@ -379,7 +399,7 @@ $ ozm log -n 5
 2026-04-26 10:18:30  config     cmd  /Users/you/project  docker compose up
 ```
 
-Actions: `clicked` (user approved), `cached` (hash matched), `config` (allowlist match), `semantic` (built-in read-only classifier), `operation` (typed repository-scoped GitHub authorization), `override` (user-approved one-time override), `denied`, `blocked`, `invalid` (metadata validation failure), `error`, `no-dialog` (GUI unavailable, command blocked).
+Actions: `clicked` (user approved), `hands-free` (automatic approval from the menu bar toggle), `cached` (hash matched), `config` (allowlist match), `semantic` (built-in read-only classifier), `operation` (typed repository-scoped GitHub authorization), `override` (user-approved one-time override), `denied`, `blocked`, `invalid` (metadata validation failure), `error`, `no-dialog` (GUI unavailable, command blocked).
 
 The `# comment` is user feedback or decision context. New records append a tab followed by `@ozm:` and a versioned JSON object. Old records remain readable. Generated shell records identify command substitutions separately from literal assignments when the static parser supports the grammar. Unsupported grammar is `unknown`. The parser does not execute, expand, or authorize anything. Persistent scripts also record their reviewed content digest without adding script bodies or arguments.
 

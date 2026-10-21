@@ -592,6 +592,11 @@ def _review_and_execute_issue_batch(
             NO_DIALOG,
         )
 
+    detail = f"approved {len(operation.issues)} issue creations for {operation.repository}"
+    if approval.feedback:
+        detail += f"; user feedback: {approval.feedback}"
+    audit_log(approval.audit_action("clicked"), "gh", command, detail)
+
     completed = 0
     for issue in operation.issues:
         fd, body_snapshot = tempfile.mkstemp(
@@ -638,7 +643,6 @@ def _review_and_execute_issue_batch(
     detail = f"created {completed} issues for {operation.repository}"
     if approval.feedback:
         detail += f"; user feedback: {approval.feedback}"
-    audit_log("clicked", "gh", command, detail)
     click.echo(f"ozm: approved GitHub issue batch; {detail}", err=True)
     sys.exit(0)
 
@@ -803,7 +807,7 @@ def _cmd_impl(
                     "temporary executable changed after approval and was not run",
                     BLOCKED,
                 )
-            audit_log("override", "cmd", command, approval.feedback)
+            audit_log(approval.audit_action("override"), "cmd", command, approval.feedback)
             click.echo("ozm: temporary executable override granted (one-time)", err=True)
             result = _run_command(args)
             sys.exit(result.returncode)
@@ -854,7 +858,7 @@ def _cmd_impl(
             sys.exit(BLOCKED)
         approval = request_override(command, f"blocked by pattern '{blocked}'", reason, agent)
         if approval.approved is True:
-            audit_log("override", audit_kind, command, approval.feedback)
+            audit_log(approval.audit_action("override"), audit_kind, command, approval.feedback)
             click.echo("ozm: override granted (one-time)", err=True)
             result = _run_command(args)
             sys.exit(result.returncode)
@@ -999,15 +1003,16 @@ def _cmd_impl(
                 )
         run_key = project_key(CMD_PREFIX + run_command)
         run_hash = _cmd_hash(run_command)
-        try:
-            save_hashes({run_key: run_hash}, merge=True)
-        except (OSError, RuntimeError) as exc:
-            audit_log("error", audit_kind, run_command, str(exc))
-            raise click_error(
-                f"could not save approval cache: {exc}. The command was NOT executed.",
-                CONFIG_ERROR,
-            ) from exc
-        audit_log("clicked", audit_kind, run_command, approval.feedback)
+        if not approval.hands_free:
+            try:
+                save_hashes({run_key: run_hash}, merge=True)
+            except (OSError, RuntimeError) as exc:
+                audit_log("error", audit_kind, run_command, str(exc))
+                raise click_error(
+                    f"could not save approval cache: {exc}. The command was NOT executed.",
+                    CONFIG_ERROR,
+                ) from exc
+        audit_log(approval.audit_action("clicked"), audit_kind, run_command, approval.feedback)
         if approval.feedback:
             click.echo(f"ozm: approved cmd — [user] {approval.feedback}", err=True)
         elif run_command != command:
