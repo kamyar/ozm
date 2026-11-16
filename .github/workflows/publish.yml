@@ -16,7 +16,7 @@ jobs:
   publish:
     # macOS runner so we can build the universal Swift menu bar binary that
     # gets bundled into the macOS wheel.
-    runs-on: macos-14
+    runs-on: macos-15
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:

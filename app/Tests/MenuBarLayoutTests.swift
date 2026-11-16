@@ -21,7 +21,7 @@ struct MenuBarLayoutTests {
     }
 
     @Test func switchKeepsItsOnColorWhenReopenedInAnInactiveWindow() throws {
-        let queue = ApprovalQueue()
+        let queue = ApprovalQueue(defaults: nil)
         let server = SocketServer()
         // Recreate the presentation without changing the shared mode.
         for handsFree in [true, true, false] {
@@ -75,7 +75,7 @@ struct MenuBarLayoutTests {
 
     @Test func popupDoesNotGrowToFillLargeWindowProposals() {
         for handsFree in [false, true] {
-            let queue = ApprovalQueue()
+            let queue = ApprovalQueue(defaults: nil)
             queue.isHandsFree = handsFree
             let server = SocketServer()
             server.isRunning = true
@@ -91,7 +91,7 @@ struct MenuBarLayoutTests {
     }
 
     @Test func nativePopoverResizesWhenTheModeChanges() async {
-        let queue = ApprovalQueue()
+        let queue = ApprovalQueue(defaults: nil)
         let server = SocketServer()
         let popover = MenuBarPopover(queue: queue, server: server)
         let offSize = popover.contentSize
@@ -115,7 +115,7 @@ struct MenuBarLayoutTests {
     @Test func approvalModesKeepTheMenuCompact() throws {
         var heights: [CGFloat] = []
         for handsFree in [false, true] {
-            let queue = ApprovalQueue()
+            let queue = ApprovalQueue(defaults: nil)
             queue.isHandsFree = handsFree
             let server = SocketServer()
             // Show the listening state without starting a socket server.

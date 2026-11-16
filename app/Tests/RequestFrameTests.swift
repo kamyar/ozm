@@ -37,7 +37,7 @@ struct RequestFrameTests {
             }
             let request = try #require(decoded)
             #expect(request.payload.content?.utf8.count == 262_144)
-            let queue = ApprovalQueue()
+            let queue = ApprovalQueue(defaults: nil)
             queue.isHandsFree = true
             let response = await withCheckedContinuation { continuation in
                 queue.enqueue(request, continuation: continuation)

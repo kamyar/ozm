@@ -49,15 +49,57 @@ struct ApprovalQueueTests {
         return task
     }
 
-    @Test func startsOffAndDoesNotPersistAcrossQueues() {
-        let queue = ApprovalQueue()
+    @Test func modesDefaultOffWithoutSavedSettings() {
+        let queue = ApprovalQueue(defaults: nil)
         #expect(!queue.isHandsFree)
+        #expect(!queue.isDND)
+    }
+
+    @Test func restoresSavedApprovalModes() throws {
+        let domain = "ozm-tests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: domain))
+        defer { defaults.removePersistentDomain(forName: domain) }
+        let queue = ApprovalQueue(defaults: defaults)
+        #expect(!queue.isHandsFree)
+        #expect(!queue.isDND)
+        queue.isDND = true
         queue.isHandsFree = true
-        #expect(!ApprovalQueue().isHandsFree)
+
+        let restartedDefaults = try #require(UserDefaults(suiteName: domain))
+        let restarted = ApprovalQueue(defaults: restartedDefaults)
+        #expect(restarted.isHandsFree)
+        #expect(restarted.isDND)
+        #expect(restarted.pending.isEmpty)
+        #expect(defaults.persistentDomain(forName: domain)?[ApprovalQueue.handsFreeKey] as? Bool == true)
+
+        restarted.isHandsFree = false
+        restarted.isDND = false
+        let disabled = ApprovalQueue(defaults: restartedDefaults)
+        #expect(!disabled.isHandsFree)
+        #expect(!disabled.isDND)
+    }
+
+    @Test func restoredHandsFreeApprovesWithoutWindowsAndKeepsDND() async throws {
+        let domain = "ozm-tests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: domain))
+        defer { defaults.removePersistentDomain(forName: domain) }
+        defaults.set(true, forKey: ApprovalQueue.handsFreeKey)
+        defaults.set(true, forKey: ApprovalQueue.dndKey)
+        let queue = ApprovalQueue(defaults: defaults)
+        let windows = Windows()
+        queue.windowManager = windows
+
+        let task = await enqueue(request(.override), on: queue)
+        let response = await task.value
+        #expect(response.decision == .allow)
+        #expect(response.handsFree)
+        #expect(queue.isDND)
+        #expect(queue.pending.isEmpty)
+        #expect(windows.opened.isEmpty)
     }
 
     @Test func newRequestsAreApprovedWithoutWindowsOrRules() async throws {
-        let queue = ApprovalQueue()
+        let queue = ApprovalQueue(defaults: nil)
         let windows = Windows()
         queue.windowManager = windows
         queue.isHandsFree = true
@@ -84,7 +126,7 @@ struct ApprovalQueueTests {
     }
 
     @Test func enablingApprovesAllPendingWithoutOpeningOtherWindows() async {
-        let queue = ApprovalQueue()
+        let queue = ApprovalQueue(defaults: nil)
         let windows = Windows()
         queue.windowManager = windows
         let first = request(.cmdApproval)
@@ -115,7 +157,7 @@ struct ApprovalQueueTests {
     }
 
     @Test func handsFreeApprovesDNDBacklogWithoutChangingDND() async {
-        let queue = ApprovalQueue()
+        let queue = ApprovalQueue(defaults: nil)
         let windows = Windows()
         queue.windowManager = windows
         queue.isDND = true
@@ -146,7 +188,7 @@ struct ApprovalQueueTests {
     }
 
     @Test func disablingRestoresManualReview() async {
-        let queue = ApprovalQueue()
+        let queue = ApprovalQueue(defaults: nil)
         let windows = Windows()
         queue.windowManager = windows
         queue.isHandsFree = true

@@ -8,9 +8,11 @@ ozm app status
 ozm app stop
 ```
 
+`ozm app start` installs a signed menu-bar application at `~/Applications/ozm.app` from the local build or bundled wheel, then opens that application in the background. Login startup must use this app bundle, not the raw `OzmApp` executable, which macOS can open in Terminal. Replace any older raw-executable login item with the app bundle and use **Launch at login** in the app settings.
+
 The menu bar has a **Hands-free** toggle. Turn it on to approve all pending and new command, script, and override requests without review. This applies to every project that uses the running app. A small blue dot beside the menu bar shield shows that the mode is active.
 
-Hands-free mode takes priority over DND. It does not change the DND setting. Turn it off to restore normal review. The mode starts off each time the app starts. There is no CLI option to enable it.
+Hands-free mode takes priority over DND. It does not change the DND setting. Turn it off to restore normal review. Both settings default to off on first use and retain the user's last choice after app and computer restarts. If hands-free is on when the app exits, automatic approval resumes when it starts again. There is no CLI option to enable it. Pending approvals and per-request input are not restored.
 
 Policy blocks and input validation remain active. An override-eligible blocked operation still needs `--reason`. Automatic approvals do not create approval-cache entries, script snapshots, or allowlist rules. Existing approvals remain unchanged. Update the CLI and the app together.
 

@@ -3,8 +3,11 @@
 
 import json
 import os
+import plistlib
+import shutil
 import subprocess
 import sys
+import tempfile
 
 import click
 
@@ -37,6 +40,57 @@ def _bundled_binary() -> str | None:
     return None
 
 
+def _install_app(binary: str) -> str:
+    """Install a real menu-bar app bundle so login never opens a terminal."""
+    app = _app_path()
+    parent = os.path.dirname(app)
+    os.makedirs(parent, exist_ok=True)
+    staging_root = tempfile.mkdtemp(prefix=".ozm-app-", dir=parent)
+    staged = os.path.join(staging_root, "ozm.app")
+    backup = os.path.join(staging_root, "previous.app")
+    preserve_backup = False
+    try:
+        contents = os.path.join(staged, "Contents")
+        macos = os.path.join(contents, "MacOS")
+        os.makedirs(macos)
+        shutil.copy2(binary, os.path.join(macos, "OzmApp"))
+        info = {
+            "CFBundleIdentifier": "com.kamyar.ozm",
+            "CFBundleExecutable": "OzmApp",
+            "CFBundleName": "ozm",
+            "CFBundlePackageType": "APPL",
+            "CFBundleVersion": "1",
+            "LSMinimumSystemVersion": "14.0",
+            "LSUIElement": True,
+            "NSHighResolutionCapable": True,
+        }
+        with open(os.path.join(contents, "Info.plist"), "wb") as file:
+            plistlib.dump(info, file)
+        subprocess.run(
+            ["/usr/bin/codesign", "--force", "--sign", "-", staged],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        had_app = os.path.lexists(app)
+        if had_app:
+            os.replace(app, backup)
+        try:
+            os.replace(staged, app)
+        except OSError:
+            if had_app:
+                try:
+                    os.replace(backup, app)
+                except OSError as exc:
+                    preserve_backup = True
+                    raise OSError(f"could not restore app; previous bundle preserved at {backup}: {exc}") from exc
+            raise
+    finally:
+        if not preserve_backup:
+            shutil.rmtree(staging_root, ignore_errors=True)
+    return app
+
+
 def _launch_detached(argv: list[str]) -> None:
     """Launch the app independently of the invoking terminal or agent."""
     subprocess.Popen(
@@ -58,19 +112,19 @@ def app_start():
     """Launch the ozm menu bar app."""
     # Prefer a local dev build, then the binary bundled in the wheel.
     binary = _dev_binary() or _bundled_binary()
-    if binary:
-        _launch_detached([binary])
-        click.echo(f"ozm: launched {binary}")
-        return
-
     app = _app_path()
-    if os.path.isdir(app):
-        _launch_detached(["open", app])
-        click.echo(f"ozm: launched {app}")
-        return
+    if binary:
+        try:
+            app = _install_app(binary)
+        except (OSError, subprocess.SubprocessError) as exc:
+            detail = getattr(exc, "stderr", None) or str(exc)
+            raise click.ClickException(f"could not prepare app bundle: {detail}") from exc
+    elif not os.path.isdir(app):
+        click.echo("ozm: app not found. Build with 'ozm app build' first.", err=True)
+        sys.exit(1)
 
-    click.echo("ozm: app not found. Build with 'ozm app build' first.", err=True)
-    sys.exit(1)
+    _launch_detached(["/usr/bin/open", "-g", app])
+    click.echo(f"ozm: launched {app}")
 
 
 @app_cmd.command("stop")

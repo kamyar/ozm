@@ -10,23 +10,34 @@ final class ApprovalQueue: ObservableObject {
         let continuation: CheckedContinuation<ApprovalResponse, Never>
     }
 
+    static let handsFreeKey = "handsFreeEnabled"
+    static let dndKey = "doNotDisturbEnabled"
+    private let defaults: UserDefaults?
+
     @Published var pending: [PendingApproval] = []
     @Published var isDND: Bool = false {
         didSet {
+            defaults?.set(isDND, forKey: Self.dndKey)
             if !isDND {
                 presentNextIfNeeded()
             }
         }
     }
-    // Session-only. Never restore automatic approval after an app restart.
     @Published var isHandsFree: Bool = false {
         didSet {
+            defaults?.set(isHandsFree, forKey: Self.handsFreeKey)
             if isHandsFree {
                 approveAllPending()
             }
         }
     }
     var windowManager: ApprovalWindowPresenting?
+
+    init(defaults: UserDefaults? = .standard) {
+        self.defaults = defaults
+        isDND = defaults?.bool(forKey: Self.dndKey) ?? false
+        isHandsFree = defaults?.bool(forKey: Self.handsFreeKey) ?? false
+    }
 
     var pendingCount: Int { pending.count }
 

@@ -27,7 +27,7 @@ After trusting, you can edit `~/.ozm/projects/myproject-*.yaml` directly. Allowl
 
 ## Hands-free mode
 
-Hands-free mode is a session-only toggle in the menu bar app, not a configuration key. It starts off each time the app starts. When on, it approves all pending and new command, script, and override requests, including requests held by DND. It applies across projects. Policy blocks and input validation remain active.
+Hands-free mode is a menu bar toggle, not a repository configuration key. The app saves hands-free and DND choices in macOS user preferences and restores them after app and computer restarts. Both default to off on first use. A saved on state resumes automatic approval at startup. When on, hands-free approves all pending and new command, script, and override requests, including requests held by DND. It applies across projects. Policy blocks and input validation remain active.
 
 Automatic approvals do not change the approval cache, script snapshots, or allowlist rules. The audit action is `hands-free`, not `clicked` or `override`. See [commands.md](commands.md#ozm-app) for usage.
 
