@@ -5,7 +5,16 @@ class Ozm < Formula
   homepage "https://github.com/kamyar/ozm"
   url "https://files.pythonhosted.org/packages/30/ae/80ea5204f1089f6c2db39499353da2da88016cf15e41eacffb4836f56ed9/ozm-2026.11.16.1.tar.gz"
   sha256 "7ab47740fef902a1e8eb742ecce3a98b920c5b05e312d70f3eada2f37fa03a19"
+  revision 1
+
   depends_on "python@3.12"
+
+  on_macos do
+    resource "ozm-app" do
+      url "https://files.pythonhosted.org/packages/a1/db/48bb01c3b2c0069b8214bd49fae9c397e14c45da15d399b40d80ff131aa8/ozm-2026.11.16.1-py3-none-macosx_14_0_universal2.whl", using: :nounzip
+      sha256 "bf3df5ab053353bc997c44246499a1cd85fedafc9cdd9581585fa20a6a5c790a"
+    end
+  end
 
   resource "click" do
     url "https://files.pythonhosted.org/packages/bb/63/f9e1ea081ce35720d8b92acde70daaedace594dc93b693c869e0d5910718/click-8.3.3.tar.gz"
@@ -23,11 +32,27 @@ class Ozm < Formula
   end
 
   def install
-    virtualenv_install_with_resources
+    if OS.mac?
+      venv = virtualenv_install_with_resources(without: "ozm-app")
+      app_dir = venv.site_packages/"ozm/_bin"
+      app_dir.mkpath
+      wheel = resource("ozm-app")
+      wheel.stage do
+        system "/usr/bin/unzip", "-j", wheel.downloader.basename, "ozm/_bin/OzmApp", "-d", app_dir
+      end
+      (app_dir/"OzmApp").chmod(0755)
+    else
+      virtualenv_install_with_resources
+    end
   end
 
   test do
     assert_match "Content-aware script execution gate", shell_output("#{bin}/ozm --help")
     assert_match version.to_s, shell_output("#{bin}/ozm version")
+    if OS.mac?
+      app = libexec/Language::Python.site_packages("python3.12")/"ozm/_bin/OzmApp"
+      assert_predicate app, :executable?
+      assert_equal %w[arm64 x86_64], shell_output("/usr/bin/lipo -archs #{app}").split.sort
+    end
   end
 end

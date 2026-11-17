@@ -82,11 +82,14 @@ jobs:
       - name: Push tag
         run: git push origin "v$(poetry version -s)"
 
-      - name: Upload sdist
+      - name: Upload release distributions
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: sdist
-          path: dist/ozm-*.tar.gz
+          name: release-distributions
+          path: |
+            dist/ozm-*.tar.gz
+            dist/ozm-*-macosx_14_0_universal2.whl
+          if-no-files-found: error
 
   update-formula:
     needs: publish
@@ -100,39 +103,13 @@ jobs:
 
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
-          name: sdist
+          name: release-distributions
           path: dist
 
-      - name: Compute SHA and fetch PyPI URL
-        id: meta
-        run: |
-          VERSION="${{ needs.publish.outputs.version }}"
-          SHA256=$(sha256sum "dist/ozm-${VERSION}.tar.gz" | cut -d' ' -f1)
-
-          for i in 1 2 3 4 5; do
-            URL=$(curl -sf "https://pypi.org/pypi/ozm/${VERSION}/json" \
-              | python -c "
-          import sys, json
-          files = json.load(sys.stdin)['urls']
-          print(next(f['url'] for f in files if f['filename'].endswith('.tar.gz')))" 2>/dev/null) \
-              && break
-            sleep 15
-          done
-
-          if [ -z "$URL" ]; then
-            echo "::error::Could not fetch sdist URL from PyPI"
-            exit 1
-          fi
-
-          echo "url=${URL}" >> "$GITHUB_OUTPUT"
-          echo "sha256=${SHA256}" >> "$GITHUB_OUTPUT"
-
-      - name: Update formula
-        run: |
-          python scripts/update_formula.py \
-            Formula/ozm.rb \
-            "${{ steps.meta.outputs.url }}" \
-            "${{ steps.meta.outputs.sha256 }}"
+      - name: Update formula from the published distributions
+        env:
+          VERSION: ${{ needs.publish.outputs.version }}
+        run: python scripts/update_formula.py Formula/ozm.rb dist "$VERSION"
 
       - name: Commit and push
         run: |

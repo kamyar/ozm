@@ -8,7 +8,7 @@ ozm app status
 ozm app stop
 ```
 
-`ozm app start` installs a signed menu-bar application at `~/Applications/ozm.app` from the local build or bundled wheel, then opens that application in the background. Login startup must use this app bundle, not the raw `OzmApp` executable, which macOS can open in Terminal. Replace any older raw-executable login item with the app bundle and use **Launch at login** in the app settings.
+`ozm app start` installs a signed menu-bar application at `~/Applications/ozm.app` and opens it in the background. Homebrew on macOS and the macOS PyPI wheel ship the prebuilt app. The app requires macOS 14 or later. Source checkouts can use `ozm app build`. Login startup must use this app bundle, not the raw `OzmApp` executable, which macOS can open in Terminal. Replace any older raw-executable login item with the app bundle and use **Launch at login** in the app settings.
 
 The menu bar has a **Hands-free** toggle. Turn it on to approve all pending and new command, script, and override requests without review. This applies to every project that uses the running app. A small blue dot beside the menu bar shield shows that the mode is active.
 
